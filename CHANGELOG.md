@@ -1,5 +1,8 @@
-
 # Changelog
+
+## v2.1
+- Added ConsentDetect teaching sketch (consent gate, TTL, overlay toggle)
+- Added privacy/ethics docs and auto-purge on startup
 
 ## v2 (current)
 - Added Arduino **long-press** → `CONSENT_TOGGLE`.
