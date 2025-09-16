@@ -7,9 +7,9 @@
 stateDiagram-v2
   [*] --> Idle
   Idle --> Review : SAVE (first press)
-  Review --> Saved : SAVE_DBL (≤1s) / Consent ON
+  Review --> Saved : SAVE_DBL (<= 1s) / Consent ON
   Review --> Review : SAVE_DBL / Consent OFF
-  Review --> Saved : "Save" button (Consent ON)
+  Review --> Saved : Save button (Consent ON)
   Review --> Idle  : Discard
   Saved --> Idle
 ```
@@ -17,7 +17,7 @@ stateDiagram-v2
 ## B. Recording lifecycle (consent + face-gate)
 
 ```mermaid
-flowchart LR
+graph LR
   A[REC toggle ON] --> B{Consent ON?}
   B -- no --> A
   B -- yes --> C{Gate on face?}
@@ -36,7 +36,7 @@ flowchart LR
 ## C. Data pipeline
 
 ```mermaid
-flowchart LR
+graph LR
   Cam(Camera) --> CV[OpenCV Detect]
   CV --> Comp[Composite over Slug]
   Comp --> UI[UI Overlays (buttons/map/toasts)]
