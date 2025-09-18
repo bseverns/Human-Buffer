@@ -57,6 +57,7 @@ final String SLUG_FILENAME     = "slug.png";
 final boolean START_MIRROR     = true;
 final float SMOOTH_FACTOR      = 0.25f;
 final float DISPLAY_SCALE      = 0.90f;
+final int   CAMERA_RETRY_DELAY_MS = 2000;
 
 final boolean START_FEATHER    = true;
 final int     FEATHER_PX       = 60;
@@ -301,7 +302,16 @@ boolean cameraReadyForProcessing() {
 
 void updateCameraStartupState() {
   if (!consent) return;
-  if (cam == null) return;
+
+  if (cam == null) {
+    if (cameraName == null) return;
+    if (camStartAttemptMs == 0 || millis() - camStartAttemptMs >= CAMERA_RETRY_DELAY_MS) {
+      camStatusMsg = "Consent ON → retrying camera…";
+      startCameraPreferred();
+    }
+    return;
+  }
+
   if (camReady) return;
 
   int elapsed = (int)(millis() - camStartAttemptMs);
@@ -399,6 +409,7 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   } catch(Exception e) {
     println("Camera init exception: " + e.getMessage());
     camStatusMsg = "Camera init failed: " + e.getMessage();
+    cam = null;
     if (!autoConfig && !camFallbackAttempted) {
       println("Retrying camera with default profile.");
       startCameraAuto();
