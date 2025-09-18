@@ -77,12 +77,22 @@ final int SESSION_REVIEW_TIMEOUT_MS = 15000; // 15s to confirm Keep
 // ------------------------------
 Capture cam;
 OpenCV  opencv;
+int     opencvW = -1;
+int     opencvH = -1;
 Serial  ard;
 VideoExport ve;
 
 PImage slug;
 PGraphics composite;
 PImage featherMask;
+
+String cameraName = null;
+boolean camReady = false;
+boolean camUsingAutoConfig = false;
+boolean camFallbackAttempted = false;
+long    camStartAttemptMs = 0;
+int     camFramesSeen = 0;
+String  camStatusMsg = null;
 
 // Consent gate: OFF by default
 boolean consent = false;
@@ -148,14 +158,9 @@ void setup() {
   frameRate(RECORD_FPS);
 
   // Camera
-  String camName = pickCamera();
-  if (camName == null) { println("No camera found. Exiting."); exit(); }
-  cam = new Capture(this, CAM_W, CAM_H, camName);
-  cam.start();
-
-  // OpenCV
-  opencv = new OpenCV(this, CAM_W, CAM_H);
-  opencv.loadCascade(OpenCV.CASCADE_FRONTALFACE);
+  cameraName = pickCamera();
+  if (cameraName == null) { println("No camera found. Exiting."); exit(); }
+  startCameraPreferred();
 
   // Slug & buffers
   slug = loadImage(SLUG_FILENAME);
@@ -180,10 +185,32 @@ void setup() {
   println("READY: s(y/n), v, c, A/N, m/d/f/g/t, o, DEL. Arduino Uno (pin13 pull-up): SAVE/SAVE_DBL/REC/CONSENT_TOGGLE.");
 }
 
-void captureEvent(Capture c) { c.read(); }
+void captureEvent(Capture c) {
+  c.read();
+  camFramesSeen++;
+
+  ensureOpenCVFor(c.width, c.height);
+
+  if (!camReady) {
+    camReady = true;
+    camStatusMsg = null;
+    println("Camera streaming @ " + c.width + "x" + c.height + (camUsingAutoConfig ? " (auto config)" : ""));
+  }
+}
 
 void draw() {
   background(0);
+
+  updateCameraStartupState();
+
+  if (!cameraReadyForProcessing()) {
+    drawCameraStatusScreen();
+    drawUIBackplates();
+    drawDataFlowMap();
+    drawTopButtons();
+    drawToast();
+    return;
+  }
 
   // --- Detect & smooth ---
   opencv.loadImage(cam);
@@ -258,21 +285,105 @@ void draw() {
     framesWrittenThisSession++;
   }
 
-  // Toast
-  if (toastMsg != null) {
-    if (millis() < toastUntilMs) {
-      pushStyle();
-      String msg = toastMsg;
-      textSize(12);
-      int tw = (int)textWidth(msg) + 24;
-      int th = 26;
-      int x = (width - tw)/2;
-      int y = height - th - 18;
-      noStroke(); fill(0, 180); rect(x, y, tw, th, 8);
-      fill(255); textAlign(CENTER, CENTER); text(msg, x + tw/2, y + th/2);
-      popStyle();
+  drawToast();
+}
+
+boolean cameraReadyForProcessing() {
+  return cam != null && camReady && opencv != null;
+}
+
+void updateCameraStartupState() {
+  if (cam == null) return;
+  if (camReady) return;
+
+  int elapsed = (int)(millis() - camStartAttemptMs);
+  if (elapsed < 0) elapsed = 0;
+
+  if (!camUsingAutoConfig && !camFallbackAttempted && elapsed > 3000 && camFramesSeen == 0) {
+    println("Camera start timed out @ " + CAM_W + "x" + CAM_H + " — retrying with camera defaults.");
+    camStatusMsg = "Camera timed out @ " + CAM_W + "x" + CAM_H + " → retrying default profile...";
+    startCameraAuto();
+    return;
+  }
+
+  if (camUsingAutoConfig && camFramesSeen == 0 && elapsed > 3000) {
+    camStatusMsg = "Camera never produced frames. Close other apps or check driver permissions.";
+  }
+}
+
+void drawCameraStatusScreen() {
+  pushStyle();
+  noStroke();
+  fill(20);
+  rect(0, 0, width, height);
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(18);
+  String msg = camStatusMsg != null ? camStatusMsg : "Waiting for camera…";
+  text(msg, width/2f, height/2f - 16);
+
+  if (camUsingAutoConfig && camFramesSeen == 0) {
+    textSize(12);
+    String extra = "Windows' ksvideosrc (0x00000020) warning usually means another app owns the camera\n" +
+                   "or the driver rejected the requested resolution. Unplug/replug or drop other capture apps.";
+    text(extra, width/2f, height/2f + 32);
+  }
+  popStyle();
+}
+
+void ensureOpenCVFor(int w, int h) {
+  if (opencv != null && opencvW == w && opencvH == h) return;
+  opencv = new OpenCV(this, w, h);
+  opencv.loadCascade(OpenCV.CASCADE_FRONTALFACE);
+  opencvW = w;
+  opencvH = h;
+  println("OpenCV configured for " + w + "x" + h);
+}
+
+void startCameraPreferred() {
+  startCamera(cameraName, CAM_W, CAM_H, false);
+}
+
+void startCameraAuto() {
+  startCamera(cameraName, 0, 0, true);
+}
+
+void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
+  if (name == null) return;
+
+  if (cam != null) {
+    try { cam.stop(); }
+    catch(Exception e) { println("Camera stop error: " + e.getMessage()); }
+  }
+  cam = null;
+
+  camReady = false;
+  camFramesSeen = 0;
+  camStartAttemptMs = millis();
+  camUsingAutoConfig = autoConfig;
+  camFallbackAttempted = autoConfig ? true : false;
+
+  opencv = null;
+  opencvW = -1;
+  opencvH = -1;
+
+  try {
+    if (autoConfig) {
+      println("Starting camera with default profile: " + name);
+      cam = new Capture(this, name);
+      camStatusMsg = "Starting camera (auto config)…";
     } else {
-      toastMsg = null;
+      println("Starting camera @ " + reqW + "x" + reqH + ": " + name);
+      cam = new Capture(this, reqW, reqH, name);
+      camStatusMsg = "Starting camera @ " + reqW + "x" + reqH + "…";
+    }
+    cam.start();
+  } catch(Exception e) {
+    println("Camera init exception: " + e.getMessage());
+    camStatusMsg = "Camera init failed: " + e.getMessage();
+    if (!autoConfig && !camFallbackAttempted) {
+      println("Retrying camera with default profile.");
+      startCameraAuto();
     }
   }
 }
@@ -630,6 +741,22 @@ void requestSaveFromSerialTap() {
   openReview();
   reviewOpenedFromSerial = true;
   lastSaveTapMs = millis();
+}
+
+void drawToast() {
+  if (toastMsg == null) return;
+  if (millis() >= toastUntilMs) { toastMsg = null; return; }
+
+  pushStyle();
+  String msg = toastMsg;
+  textSize(12);
+  int tw = (int)textWidth(msg) + 24;
+  int th = 26;
+  int x = (width - tw)/2;
+  int y = height - th - 18;
+  noStroke(); fill(0, 180); rect(x, y, tw, th, 8);
+  fill(255); textAlign(CENTER, CENTER); text(msg, x + tw/2, y + th/2);
+  popStyle();
 }
 
 void toast(String msg, int ms) {
