@@ -64,7 +64,7 @@ face-slug-privacy-teaching/
 ## Data-flow (high level)
 
 ```mermaid
-flowchart LR
+graph LR
     C(Camera) --> D[Detect (RAM)]
     D --> R{Review}
     R -- Save --> PNG[Write PNG]
@@ -87,20 +87,20 @@ sequenceDiagram
   participant FS as FileSystem
 
   BTN->>MCU: Press SAVE
-  MCU->>Host: "SAVE"
+  MCU->>Host: SAVE
   Host->>Host: Capture preview (RAM); open Review
 
   BTN->>MCU: Second press (<= 1s)
-  MCU->>Host: "SAVE_DBL"
+  MCU->>Host: SAVE_DBL
   alt Consent ON
     Host->>FS: Save PNG immediately
   else Consent OFF
     Host->>Host: Remain in Review; prompt for consent
   end
 
-  BTN->>MCU: Long-press SAVE (>=1.5s)
-  MCU->>Host: "CONSENT_TOGGLE"
-  Host->>Host: Consent flips ON<->OFF
+  BTN->>MCU: Long-press SAVE (>= 1.5s)
+  MCU->>Host: CONSENT_TOGGLE
+  Host->>Host: Consent flips ON <-> OFF
 ```
 
 ## License
