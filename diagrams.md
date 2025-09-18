@@ -17,7 +17,7 @@ stateDiagram-v2
 ## B. Recording lifecycle (consent + face-gate)
 
 ```mermaid
-graph LR
+flowchart LR
   start([REC toggle on]) --> consent{Consent on?}
   consent -->|No| start
   consent -->|Yes| gate{Face gate enabled?}
@@ -36,7 +36,7 @@ graph LR
 ## C. Data pipeline
 
 ```mermaid
-graph LR
+flowchart LR
   camera[Camera feed] --> detect[OpenCV detect]
   detect --> composite[Composite with slug art]
   composite --> ui[UI overlays buttons map toasts]
