@@ -13,32 +13,23 @@
   - Video Export (hamoid)
 
 ### Arduino
-- Any board with native USB-serial (e.g., Uno, Nano, Leonardo, Micro, MKR, etc.).
+- Any board with native USB-serial (e.g., Uno).
 - No extra libraries required.
 
 ## 2) Hardware (fill in)
 
 ### Camera
-- **Model / driver**: _TODO_
-- **Resolution/format**: _TODO_
-- **Mounting & FOV**: _TODO_
-- **Lighting considerations**: _TODO_
+- **Model / driver**: Common USB Webcam
+- **Resolution/format**: 1280x760
+- **Lighting considerations**: Dependent on camera model selected. Have a desk lamp available to help OpenCV.
 
 ### Computer / OS
-- **OS**: _TODO_
-- **GPU**: _TODO_
-- **USB ports & hubs**: _TODO_
+- **OS**: Designed to use on my Surface 7 Pro running Windows 10, but it works on Windows 11 too. Apple tests forthcoming.
 
 ### Arduino + Buttons
-- **Board**: _TODO_
+- **Board**: Uno
 - **Wiring**: Buttons from pin → **GND** (use `INPUT_PULLUP`).
 - **Pins**: SAVE = D2, REC = D3 (change in code if needed).
-- **Enclosures / panel mount**: _TODO_
-
-### Power / Safety
-- **Power budget**: _TODO_
-- **Cable management**: _TODO_
-- **Emergency stop / supervisor**: _TODO_
 
 ## 3) Deployment
 
@@ -49,9 +40,3 @@ captures/
 sessions/
 *.mp4
 ```
-
-### Kiosk mode (optional)
-- _TODO: describe full-screen, auto-launch, watchdog, etc._
-
-### Accessibility
-- _TODO: physical affordances, readable color contrast, alternative input, teaching aids._
