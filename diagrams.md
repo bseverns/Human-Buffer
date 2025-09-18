@@ -17,30 +17,30 @@ stateDiagram-v2
 ## B. Recording lifecycle (consent + face-gate)
 
 ```mermaid
-flowchart LR
-  start([REC toggle ON]) --> consent{Consent ON?}
-  consent -- No --> start
-  consent -- Yes --> gate{Gate on face?}
-  gate -- No --> writer[Write frames every draw()]
-  gate -- Yes --> present{Face present?}
-  present -- Yes --> writer
-  present -- No --> start
-  writer --> stop([REC toggle OFF])
-  stop --> written{Frames written > 0?}
-  written -- No --> delete[Delete empty MP4]
-  written -- Yes --> review{Session Review Keep/Discard}
-  review -- Keep --> keep[Keep MP4]
-  review -- Discard/Timeout --> delete
+graph LR
+  start([REC toggle on]) --> consent{Consent on?}
+  consent -->|No| start
+  consent -->|Yes| gate{Face gate enabled?}
+  gate -->|No| writer[Write frames each draw]
+  gate -->|Yes| present{Face detected?}
+  present -->|Yes| writer
+  present -->|No| start
+  writer --> stop([REC toggle off])
+  stop --> written{Frames written > zero?}
+  written -->|No| delete[Delete empty MP4]
+  written -->|Yes| review{Session review keep or discard}
+  review -->|Keep| keep[Keep MP4]
+  review -->|Discard or timeout| delete
 ```
 
 ## C. Data pipeline
 
 ```mermaid
-flowchart LR
-  camera[[Camera]] --> detect[OpenCV Detect]
-  detect --> composite[Composite over Slug]
-  composite --> ui[UI Overlays (buttons/map/toasts)]
-  ui -->|Consent-gated| disk[(Disk PNG/MP4)]
+graph LR
+  camera[Camera feed] --> detect[OpenCV detect]
+  detect --> composite[Composite with slug art]
+  composite --> ui[UI overlays buttons map toasts]
+  ui -->|Consent gate| disk[Disk PNG or MP4]
 ```
 
 ## D. Serial interactions
