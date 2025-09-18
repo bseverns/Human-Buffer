@@ -125,7 +125,6 @@ Random  avatarRng  = new Random(avatarSeed);
 
 // UI buttons
 ArrayList<Btn> buttons = new ArrayList<Btn>();
-Btn btnConsent, btnAvatar, btnREC, btnShow, btnDelete;
 
 // Double-tap tracking (serial-origin only)
 long lastSaveTapMs = -1;
@@ -862,14 +861,4 @@ void dispose() {
   stopRecording();
   if (cam!=null) cam.stop();
   if (ard!=null) ard.stop();
-}
-
-// ------------------------------
-// SAVE (serial first-tap helper)
-// ------------------------------
-void requestSaveFromSerialTap() {
-  reviewFrame = composite.get();
-  openReview();
-  reviewOpenedFromSerial = true;
-  lastSaveTapMs = millis();
 }
