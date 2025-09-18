@@ -56,6 +56,7 @@ final String SERIAL_HINT       = "usb|acm|modem|COM|tty";
 final String SLUG_FILENAME     = "slug.png";
 final boolean START_MIRROR     = true;
 final float SMOOTH_FACTOR      = 0.25f;
+final float DISPLAY_SCALE      = 0.90f;
 
 final boolean START_FEATHER    = true;
 final int     FEATHER_PX       = 60;
@@ -160,7 +161,7 @@ void setup() {
   // Camera
   cameraName = pickCamera();
   if (cameraName == null) { println("No camera found. Exiting."); exit(); }
-  startCameraPreferred();
+  camStatusMsg = "Consent is OFF — camera parked.";
 
   // Slug & buffers
   slug = loadImage(SLUG_FILENAME);
@@ -195,6 +196,7 @@ void captureEvent(Capture c) {
     camReady = true;
     camStatusMsg = null;
     println("Camera streaming @ " + c.width + "x" + c.height + (camUsingAutoConfig ? " (auto config)" : ""));
+    updateButtonLabels();
   }
 }
 
@@ -262,7 +264,12 @@ void draw() {
   }
 
   composite.endDraw();
-  image(composite, 0, 0);
+
+  float scaledW = composite.width * DISPLAY_SCALE;
+  float scaledH = composite.height * DISPLAY_SCALE;
+  float offsetX = (width  - scaledW) * 0.5f;
+  float offsetY = (height - scaledH) * 0.5f;
+  image(composite, offsetX, offsetY, scaledW, scaledH);
 
   // --- UI: map + buttons + status ---
   drawUIBackplates();
@@ -293,6 +300,7 @@ boolean cameraReadyForProcessing() {
 }
 
 void updateCameraStartupState() {
+  if (!consent) return;
   if (cam == null) return;
   if (camReady) return;
 
@@ -319,10 +327,18 @@ void drawCameraStatusScreen() {
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(18);
-  String msg = camStatusMsg != null ? camStatusMsg : "Waiting for camera…";
+  String msg;
+  if (!consent) {
+    msg = "Consent is OFF → camera parked.";
+  } else {
+    msg = camStatusMsg != null ? camStatusMsg : "Waiting for camera…";
+  }
   text(msg, width/2f, height/2f - 16);
 
-  if (camUsingAutoConfig && camFramesSeen == 0) {
+  if (!consent) {
+    textSize(12);
+    text("Toggle Consent (button or 'c') to wake the camera.", width/2f, height/2f + 24);
+  } else if (camUsingAutoConfig && camFramesSeen == 0) {
     textSize(12);
     String extra = "Windows' ksvideosrc (0x00000020) warning usually means another app owns the camera\n" +
                    "or the driver rejected the requested resolution. Unplug/replug or drop other capture apps.";
@@ -356,6 +372,8 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
     catch(Exception e) { println("Camera stop error: " + e.getMessage()); }
   }
   cam = null;
+
+  updateButtonLabels();
 
   camReady = false;
   camFramesSeen = 0;
@@ -409,23 +427,32 @@ class Btn {
   boolean hit(int mx, int my) { return enabled && mx>=x && mx<=x+w && my>=y && my<=y+h; }
 }
 
-Btn btnConsent, btnAvatar, btnREC, btnShow, btnDelete;
+Btn btnConsent, btnCapture, btnAvatar, btnREC, btnShow, btnDelete;
 
 void buildButtons() {
-  int pad=8, bw=140, bh=28, x=pad, y=pad;
+  int pad=8, bw=120, bh=28, x=pad, y=pad;
   btnConsent = new Btn("consent", "Consent: OFF", x, y, bw, bh); x += bw + pad;
+  btnCapture = new Btn("capture", "Capture", x, y, bw, bh); x += bw + pad;
   btnAvatar  = new Btn("avatar",  "Avatar: OFF",  x, y, bw, bh); x += bw + pad;
   btnREC     = new Btn("rec",     "REC: OFF",     x, y, bw, bh); x += bw + pad;
   btnShow    = new Btn("show",    "Show my image", x, y, bw, bh); x += bw + pad;
   btnDelete  = new Btn("delete",  "Delete now",    x, y, bw, bh);
   buttons.clear();
-  buttons.add(btnConsent); buttons.add(btnAvatar); buttons.add(btnREC);
+  buttons.add(btnConsent); buttons.add(btnCapture); buttons.add(btnAvatar); buttons.add(btnREC);
   buttons.add(btnShow);    buttons.add(btnDelete);
   updateButtonLabels();
 }
 
 void updateButtonLabels() {
   btnConsent.label = "Consent: " + (consent ? "ON" : "OFF");
+  if (!consent) {
+    btnCapture.label = "Capture (needs consent)";
+  } else if (!cameraReadyForProcessing()) {
+    btnCapture.label = "Capture (warmup)";
+  } else {
+    btnCapture.label = "Capture now";
+  }
+  btnCapture.enabled = consent && cameraReadyForProcessing();
   btnAvatar.label  = "Avatar: "  + (avatarMode ? "ON" : "OFF");
   btnREC.label     = "REC: "     + (recording ? "ON" : "OFF");
   btnShow.enabled  = (lastSavedPath != null);
@@ -445,13 +472,66 @@ void mousePressed() {
 
   for (Btn b : buttons) {
     if (b.hit(mouseX, mouseY)) {
-      if (b == btnConsent) { consent = !consent; updateButtonLabels(); toast(consent?"Consent ON":"Consent OFF",1200); return; }
+      if (b == btnConsent) { toggleConsent("Consent ON", "Consent OFF"); return; }
+      if (b == btnCapture) { requestSave(); return; }
       if (b == btnAvatar)  { avatarMode = !avatarMode; updateButtonLabels(); return; }
       if (b == btnREC)     { toggleRecording(); updateButtonLabels(); return; }
       if (b == btnShow && lastSavedPath != null)   { showLastSavedOverlay(); return; }
       if (b == btnDelete && lastSavedPath != null) { confirmDeleteLast(); return; }
     }
   }
+}
+
+void toggleConsent(String toastOn, String toastOff) {
+  setConsent(!consent, toastOn, toastOff);
+}
+
+void setConsent(boolean newState, String toastOn, String toastOff) {
+  if (consent == newState) {
+    if (consent && toastOn != null) toast(toastOn, 1200);
+    if (!consent && toastOff != null) toast(toastOff, 1200);
+    return;
+  }
+
+  consent = newState;
+
+  if (consent) {
+    if (toastOn != null) toast(toastOn, 1200);
+    startCameraIfNeeded();
+  } else {
+    if (toastOff != null) toast(toastOff, 1200);
+    stopRecording();
+    shutdownCamera("Consent is OFF — camera parked.");
+  }
+
+  updateButtonLabels();
+}
+
+void startCameraIfNeeded() {
+  if (cam != null || cameraName == null) return;
+  startCameraPreferred();
+}
+
+void shutdownCamera(String reason) {
+  if (cam != null) {
+    try { cam.stop(); }
+    catch(Exception e) { println("Camera stop error: " + e.getMessage()); }
+  }
+  cam = null;
+  camReady = false;
+  camFramesSeen = 0;
+  camStartAttemptMs = 0;
+  camUsingAutoConfig = false;
+  camFallbackAttempted = false;
+  if (reason != null) camStatusMsg = reason;
+
+  opencv = null;
+  opencvW = -1;
+  opencvH = -1;
+
+  haveFace = false;
+  facePresentStreak = 0;
+  faceMissingStreak = 0;
 }
 
 // ------------------------------
@@ -496,9 +576,9 @@ void drawReviewOverlay() {
 }
 
 void requestSave() {
-  reviewFrame = composite.get(); // RAM only
-  openReview();
-  reviewOpenedFromSerial = false; // keyboard-origin
+  if (prepareReviewFrame(false)) {
+    lastSaveTapMs = -1;
+  }
 }
 
 void commitSave() {
@@ -690,9 +770,7 @@ void serialEvent(Serial s) {
   String u = line.toUpperCase();
 
   if (u.equals("CONSENT_TOGGLE")) {
-    consent = !consent;
-    updateButtonLabels();
-    toast(consent? "Consent ON (via Arduino)" : "Consent OFF (via Arduino)", 1400);
+    toggleConsent("Consent ON (via Arduino)", "Consent OFF (via Arduino)");
     return;
   }
 
@@ -705,6 +783,12 @@ void serialEvent(Serial s) {
         if (inReview && reviewFrame != null) {
           commitSave(); // confirm the first-tap preview
         } else {
+          if (!cameraReadyForProcessing()) {
+            toast("Camera is still waking up.", 1500);
+            reviewOpenedFromSerial = false;
+            lastSaveTapMs = -1;
+            return;
+          }
           PImage snap = composite.get();
           String fn = "captures/face-" + timestamp(true) + ".png";
           snap.save(fn);
@@ -737,10 +821,25 @@ void serialEvent(Serial s) {
 }
 
 void requestSaveFromSerialTap() {
+  if (prepareReviewFrame(true)) {
+    lastSaveTapMs = millis();
+  } else {
+    lastSaveTapMs = -1;
+  }
+}
+
+boolean prepareReviewFrame(boolean fromSerial) {
+  if (!cameraReadyForProcessing()) {
+    String msg = consent ? "Camera is still waking up." : "Consent OFF → camera parked.";
+    toast(msg, 1500);
+    reviewOpenedFromSerial = false;
+    return false;
+  }
+
   reviewFrame = composite.get();
   openReview();
-  reviewOpenedFromSerial = true;
-  lastSaveTapMs = millis();
+  reviewOpenedFromSerial = fromSerial;
+  return true;
 }
 
 void drawToast() {
@@ -820,7 +919,7 @@ void keyPressed() {
   if (key == 'n' || key=='N') { if (inReview) cancelReview(); }
 
   if (key == 'v' || key=='V') { toggleRecording(); updateButtonLabels(); }
-  if (key == 'c' || key=='C') { consent = !consent; updateButtonLabels(); toast(consent?"Consent ON":"Consent OFF",1200); }
+  if (key == 'c' || key=='C') { toggleConsent("Consent ON", "Consent OFF"); }
   if (key == 'm' || key=='M') mirrorPreview = !mirrorPreview;
   if (key == 'd' || key=='D') debugOverlay = !debugOverlay;
   if (key == 'f' || key=='F') useFeather = !useFeather;
@@ -1043,6 +1142,6 @@ void pruneCaptures() {
 // ------------------------------
 void dispose() {
   stopRecording();
-  if (cam!=null) cam.stop();
+  shutdownCamera(null);
   if (ard!=null) ard.stop();
 }
