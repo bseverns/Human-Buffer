@@ -37,9 +37,21 @@ A Processing + Arduino sketch that doubles as a workshop kit on community consen
 - **Buttons (top bar):** Consent, Avatar, REC, Show my image, Delete now
 - **Keys:** `s` (save→review), `y/n` (confirm/discard), `v` (REC), `c` (consent),
   `m` (mirror), `d` (debug), `f` (feather), `g` (gate writes on face), `t` (auto REC on face),
-  `A` (avatar), `N` (new avatar), `o` (show last), `Delete` (delete last)
+ `A` (avatar), `N` (new avatar), `o` (show last), `Delete` (delete last)
 - **Arduino serial:** `SAVE` (first tap), `SAVE_DBL` (second tap ≤1s), `REC` (toggle),
   `CONSENT_TOGGLE` (long-press ≥1.5s)
+
+### No Arduino? No problem.
+
+Running this on a laptop with zero hardware attached is totally valid. The console will drop a
+message that reads:
+
+```
+No serial ports found — keyboard/mouse controls stay live. Plug in the workshop Arduino and restart when ready.
+```
+
+That’s just the sketch letting you know it didn’t detect the optional button board. You can hammer on
+the on-screen UI or the keyboard shortcuts and every feature still works.
 
 ## Folder structure
 
