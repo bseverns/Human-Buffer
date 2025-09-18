@@ -21,6 +21,11 @@ import processing.data.JSONObject;
 Capture cam;
 OpenCV opencv;
 
+// Camera boot happens off-thread so the UI doesn't beachball while
+// GStreamer enumerates devices (which can take ages on macOS).
+boolean cameraInitializing = false;
+String statusMessage = "Press y to start the camera.";
+
 // State machine: we start at CONSENT, then show PREVIEW once the user opts in,
 // and finally REVIEW when a frame has been captured and awaits a decision.
 String state = "CONSENT"; // CONSENT -> PREVIEW -> REVIEW
@@ -61,10 +66,22 @@ void drawConsent() {
   // Simple prompt: nothing happens until the user hits "y".
   text("Start camera?", width/2, height/2 - 20);
   text("[y]es  |  [n]o", width/2, height/2 + 20);
+  if (cameraInitializing) {
+    text("Looking for cameras...", width/2, height/2 + 60);
+  } else if (statusMessage != null && statusMessage.length() > 0) {
+    text(statusMessage, width/2, height/2 + 60);
+  }
   drawStatus();
 }
 
 void drawPreview() {
+  if (cam == null) {
+    fill(255);
+    textAlign(CENTER, CENTER);
+    text("Camera not ready.", width/2, height/2);
+    drawStatus();
+    return;
+  }
   // Pull the next frame if it's ready.
   if (cam.available()) cam.read();
   image(cam, 0, 0); // dump the raw camera feed to the screen
@@ -108,18 +125,17 @@ void keyPressed() {
 }
 
 void startCamera() {
-  // Camera springs to life only after explicit consent.
-  cam = new Capture(this, 640, 480);
-  cam.start();
+  if (cameraInitializing || cam != null) {
+    return; // either we're already spinning it up or it's live
+  }
 
-  // Load the classic Haar cascade—fast, simple, and good for demos.
-  opencv = new OpenCV(this, 640, 480);
-  opencv.loadCascade(OpenCV.CASCADE_FRONTALFACE);
-
-  state = "PREVIEW"; // start streaming frames
+  cameraInitializing = true;
+  statusMessage = "Initializing camera...";
+  thread("initCamera");
 }
 
 void captureFrame() {
+  if (cam == null) return;
   // Grab the current frame so the user can mull it over.
   reviewFrame = cam.get();
   state = "REVIEW";
@@ -136,7 +152,42 @@ void drawStatus() {
   fill(255);
   textSize(12);
   textAlign(LEFT, BOTTOM);
-  text(BUILD + "  ·  Camera → Detect (RAM) → Save/Discard", 5, height-5);
+  String msg = BUILD + "  ·  Camera → Detect (RAM) → Save/Discard";
+  if (cameraInitializing) {
+    msg += "  ·  spinning up camera";
+  } else if (statusMessage != null && statusMessage.length() > 0) {
+    msg += "  ·  " + statusMessage;
+  }
+  text(msg, 5, height-5);
+}
+
+void initCamera() {
+  try {
+    String[] cameras = Capture.list();
+    if (cameras == null || cameras.length == 0) {
+      statusMessage = "No cameras detected.";
+      state = "CONSENT";
+      return;
+    }
+
+    // Camera springs to life only after explicit consent.
+    cam = new Capture(this, cameras[0]);
+    cam.start();
+
+    // Load the classic Haar cascade—fast, simple, and good for demos.
+    opencv = new OpenCV(this, 640, 480);
+    opencv.loadCascade(OpenCV.CASCADE_FRONTALFACE);
+
+    state = "PREVIEW"; // start streaming frames
+    statusMessage = "Camera live. Space to capture.";
+  } catch (Exception e) {
+    statusMessage = "Camera failed: " + e.getMessage();
+    state = "CONSENT";
+    cam = null;
+    opencv = null;
+  } finally {
+    cameraInitializing = false;
+  }
 }
 
 /**
