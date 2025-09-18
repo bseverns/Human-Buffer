@@ -42,6 +42,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.HashSet;
 
 // ------------------------------
 // CONFIG
@@ -789,10 +790,14 @@ PImage loadImageSafe(String relPath) {
 // Serial (Arduino Uno w/ pin 13 pull-up switch)
 // ------------------------------
 void setupSerial() {
-  String[] ports = Serial.list();
+  String[] rawPorts = Serial.list();
+  String[] ports = dedupeStringsCaseInsensitive(rawPorts);
   if (ports == null || ports.length == 0) {
     println("No serial ports found — keyboard/mouse controls stay live. Plug in the workshop Arduino and restart when ready.");
     return;
+  }
+  if (rawPorts != null && ports.length != rawPorts.length) {
+    println("Serial list deduped (" + rawPorts.length + " → " + ports.length + ") to hide driver clones.");
   }
   println("Serial ports:");
   for (int i=0;i<ports.length;i++) println("  ["+i+"] "+ports[i]);
@@ -1151,7 +1156,12 @@ PImage makeRadialFeatherMask(int w, int h, float innerRadius, float featherPx) {
 }
 
 String pickCamera() {
-  String[] cams = Capture.list(); if (cams == null || cams.length == 0) return null;
+  String[] raw = Capture.list();
+  String[] cams = dedupeStringsCaseInsensitive(raw);
+  if (cams == null || cams.length == 0) return null;
+  if (raw != null && cams.length != raw.length) {
+    println("Camera list deduped (" + raw.length + " → " + cams.length + ") to avoid ghost entries.");
+  }
 
   String preferredName = "usb video device";
   for (String c : cams) {
@@ -1163,6 +1173,22 @@ String pickCamera() {
   for (String c : cams) if (c.toLowerCase().contains("1280x720"))  return c;
   for (String c : cams) if (c.toLowerCase().contains("1920x1080")) return c;
   return cams[0];
+}
+
+String[] dedupeStringsCaseInsensitive(String[] input) {
+  if (input == null) return null;
+  ArrayList<String> clean = new ArrayList<String>();
+  HashSet<String> seen = new HashSet<String>();
+  for (String raw : input) {
+    if (raw == null) continue;
+    String trimmed = raw.trim();
+    String key = trimmed.toLowerCase();
+    if (!seen.contains(key)) {
+      seen.add(key);
+      clean.add(trimmed);
+    }
+  }
+  return clean.toArray(new String[clean.size()]);
 }
 
 String timestamp(boolean includeMillis) {
