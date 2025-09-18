@@ -58,6 +58,9 @@ final boolean START_MIRROR     = true;
 final float SMOOTH_FACTOR      = 0.25f;
 final float DISPLAY_SCALE      = 0.90f;
 
+final int   CAM_RETRY_DELAY_MS = 1800;
+final int   CAM_AUTO_RETRY_MAX = 3;
+
 final boolean START_FEATHER    = true;
 final int     FEATHER_PX       = 60;
 
@@ -94,6 +97,8 @@ boolean camFallbackAttempted = false;
 long    camStartAttemptMs = 0;
 int     camFramesSeen = 0;
 String  camStatusMsg = null;
+int     camAutoRetryCount = 0;
+long    camRetryAtMs = 0;
 
 // Consent gate: OFF by default
 boolean consent = false;
@@ -196,6 +201,8 @@ void captureEvent(Capture c) {
     camReady = true;
     camStatusMsg = null;
     println("Camera streaming @ " + c.width + "x" + c.height + (camUsingAutoConfig ? " (auto config)" : ""));
+    camAutoRetryCount = 0;
+    camRetryAtMs = 0;
     updateButtonLabels();
   }
 }
@@ -301,6 +308,13 @@ boolean cameraReadyForProcessing() {
 
 void updateCameraStartupState() {
   if (!consent) return;
+
+  if (camRetryAtMs > 0 && millis() >= camRetryAtMs) {
+    camRetryAtMs = 0;
+    println("Retrying camera (auto config) — attempt " + camAutoRetryCount + " / " + CAM_AUTO_RETRY_MAX);
+    startCameraAuto();
+    return;
+  }
   if (cam == null) return;
   if (camReady) return;
 
@@ -315,7 +329,12 @@ void updateCameraStartupState() {
   }
 
   if (camUsingAutoConfig && camFramesSeen == 0 && elapsed > 3000) {
-    camStatusMsg = "Camera never produced frames. Close other apps or check driver permissions.";
+    if (camRetryAtMs == 0) {
+      boolean scheduled = scheduleAutoRetry("Camera never produced frames.");
+      if (!scheduled) {
+        camStatusMsg = "Camera never produced frames. Close other apps or check driver permissions.";
+      }
+    }
   }
 }
 
@@ -380,6 +399,10 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   camStartAttemptMs = millis();
   camUsingAutoConfig = autoConfig;
   camFallbackAttempted = autoConfig ? true : false;
+  if (!autoConfig) {
+    camAutoRetryCount = 0;
+  }
+  camRetryAtMs = 0;
 
   opencv = null;
   opencvW = -1;
@@ -399,11 +422,28 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   } catch(Exception e) {
     println("Camera init exception: " + e.getMessage());
     camStatusMsg = "Camera init failed: " + e.getMessage();
+    cam = null;
     if (!autoConfig && !camFallbackAttempted) {
       println("Retrying camera with default profile.");
       startCameraAuto();
+    } else if (autoConfig) {
+      scheduleAutoRetry("Camera init failed: " + e.getMessage());
     }
   }
+}
+
+boolean scheduleAutoRetry(String reason) {
+  if (camAutoRetryCount >= CAM_AUTO_RETRY_MAX) {
+    camStatusMsg = reason + " (check USB power/permissions and restart).";
+    return false;
+  }
+
+  int attempt = camAutoRetryCount + 1;
+  camAutoRetryCount = attempt;
+  camRetryAtMs = millis() + CAM_RETRY_DELAY_MS;
+  camStatusMsg = reason + " Retrying (" + attempt + " / " + CAM_AUTO_RETRY_MAX + ")…";
+  println("Scheduling camera retry (attempt " + attempt + " / " + CAM_AUTO_RETRY_MAX + ") in " + CAM_RETRY_DELAY_MS + "ms.");
+  return true;
 }
 
 // ------------------------------
@@ -523,6 +563,8 @@ void shutdownCamera(String reason) {
   camStartAttemptMs = 0;
   camUsingAutoConfig = false;
   camFallbackAttempted = false;
+  camAutoRetryCount = 0;
+  camRetryAtMs = 0;
   if (reason != null) camStatusMsg = reason;
 
   opencv = null;
