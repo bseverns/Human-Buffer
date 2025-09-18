@@ -533,12 +533,12 @@ void setupSerial() {
   for (int i=0;i<ports.length;i++) if (ports[i].toLowerCase().matches(".*(" + SERIAL_HINT + ").*")) { pick=i; break; }
   if (pick==-1) pick=0;
   println("Connecting to: " + ports[pick]);
-  try { ard = new Serial(this, ports[pick], SERIAL_BAUD); ard.bufferUntil('\\n'); }
+  try { ard = new Serial(this, ports[pick], SERIAL_BAUD); ard.bufferUntil('\n'); }
   catch(Exception e){ println("Serial error: "+e.getMessage()); ard=null; }
 }
 
 void serialEvent(Serial s) {
-  String line = s.readStringUntil('\\n');
+  String line = s.readStringUntil('\n');
   if (line == null) return;
   line = trim(line);
   if (line.length()==0) return;
