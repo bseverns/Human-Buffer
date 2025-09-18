@@ -12,6 +12,9 @@
  * - On-screen UI: Consent, Avatar, REC, Show last image, Delete last image.
  * - Data-flow map: "Camera → Detect (RAM) → Review [Save | Discard]"
  *
+ * Hardware IO: Arduino Uno @115200 baud. Momentary switch tied from digital pin 13 → GND
+ *   using the internal pull-up. Short tap = SAVE, double tap = SAVE_DBL, long hold toggles consent.
+ *
  * Serial commands (newline-terminated):
  *   "SAVE"         : capture preview → open Review (no write)
  *   "SAVE_DBL"     : double press → auto-save if Consent ON; else remain in Review
@@ -173,7 +176,7 @@ void setup() {
 
   registerMethod("dispose", this);
 
-  println("READY: s(y/n), v, c, A/N, m/d/f/g/t, o, DEL. Arduino: SAVE/SAVE_DBL/REC/CONSENT_TOGGLE.");
+  println("READY: s(y/n), v, c, A/N, m/d/f/g/t, o, DEL. Arduino Uno (pin13 pull-up): SAVE/SAVE_DBL/REC/CONSENT_TOGGLE.");
 }
 
 void captureEvent(Capture c) { c.read(); }
@@ -234,6 +237,7 @@ void draw() {
   image(composite, 0, 0);
 
   // --- UI: map + buttons + status ---
+  drawUIBackplates();
   drawDataFlowMap();
   drawTopButtons();
   if (recording) drawRECIndicator();
@@ -520,7 +524,7 @@ void deleteLastSaved() {
 }
 
 // ------------------------------
-// Serial
+// Serial (Arduino Uno w/ pin 13 pull-up switch)
 // ------------------------------
 void setupSerial() {
   String[] ports = Serial.list();
@@ -675,6 +679,20 @@ void keyPressed() {
 // ------------------------------
 // Teaching UI bits
 // ------------------------------
+void drawUIBackplates() {
+  // Keep the teaching overlay legible even when the slug art is loud.
+  pushStyle();
+  noStroke();
+  fill(0, 180);
+  int topBarH = 28 + 16; // button height + breathing room
+  rect(0, 0, width, topBarH);
+
+  int mapPad = 12;
+  int mapBoxH = 56;
+  rect(0, topBarH, 280, mapBoxH + mapPad);
+  popStyle();
+}
+
 void drawDataFlowMap() {
   int x = 8, y = 8 + 28 + 8;
   pushStyle();
