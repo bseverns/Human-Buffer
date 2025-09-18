@@ -24,7 +24,9 @@ OpenCV opencv;
 // Camera boot happens off-thread so the UI doesn't beachball while
 // GStreamer enumerates devices (which can take ages on macOS).
 boolean cameraInitializing = false;
-String statusMessage = "Press y to start the camera.";
+boolean videoLibraryReady = false;
+boolean videoLibraryFailed = false;
+String statusMessage = "Booting video library...";
 
 // State machine: we start at CONSENT, then show PREVIEW once the user opts in,
 // and finally REVIEW when a frame has been captured and awaits a decision.
@@ -49,6 +51,8 @@ void setup() {
   surface.setTitle("Consent-Gated Face Detector");
   // Clean out any expired captures from prior runs before we do anything else.
   storage.purgeExpired();
+  // Spin up GStreamer on a worker thread so macOS doesn't beachball the UI.
+  thread("warmVideoLibrary");
 }
 
 void draw() {
@@ -65,7 +69,13 @@ void drawConsent() {
   textAlign(CENTER, CENTER);
   // Simple prompt: nothing happens until the user hits "y".
   text("Start camera?", width/2, height/2 - 20);
-  text("[y]es  |  [n]o", width/2, height/2 + 20);
+  if (videoLibraryReady && !videoLibraryFailed) {
+    text("[y]es  |  [n]o", width/2, height/2 + 20);
+  } else if (videoLibraryFailed) {
+    text("Video library failed. [n]o to quit.", width/2, height/2 + 20);
+  } else {
+    text("Hang tight...", width/2, height/2 + 20);
+  }
   if (cameraInitializing) {
     text("Looking for cameras...", width/2, height/2 + 60);
   } else if (statusMessage != null && statusMessage.length() > 0) {
@@ -129,6 +139,16 @@ void startCamera() {
     return; // either we're already spinning it up or it's live
   }
 
+  if (!videoLibraryReady) {
+    statusMessage = "Video library still loading.";
+    return;
+  }
+
+  if (videoLibraryFailed) {
+    statusMessage = "Video library unavailable.";
+    return;
+  }
+
   cameraInitializing = true;
   statusMessage = "Initializing camera...";
   thread("initCamera");
@@ -159,6 +179,17 @@ void drawStatus() {
     msg += "  ·  " + statusMessage;
   }
   text(msg, 5, height-5);
+}
+
+void warmVideoLibrary() {
+  try {
+    Capture.list();
+    videoLibraryReady = true;
+    statusMessage = "Press y to start the camera.";
+  } catch (Exception e) {
+    videoLibraryFailed = true;
+    statusMessage = "Video init failed: " + e.getMessage();
+  }
 }
 
 void initCamera() {
