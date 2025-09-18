@@ -47,51 +47,71 @@ import java.util.HashSet;
 // ------------------------------
 // CONFIG
 // ------------------------------
+// OUTPUT_SIZE: final rendered square avatar. The UI scales around this, so we keep it stable.
 final int   OUTPUT_SIZE        = 800;
+// CAM_W / CAM_H: preferred capture profile. We downscale later but detection loves higher res.
 final int   CAM_W              = 1280;
 final int   CAM_H              = 720;
+// SQUARE_SCALE: face bounding box inflation; gives breathing room beyond raw detection.
 final float SQUARE_SCALE       = 1.35f;
+// RECORD_FPS: matches both Processing draw() and VideoExport to prevent frame duplication.
 final int   RECORD_FPS         = 30;
+// SERIAL_BAUD + SERIAL_HINT: handshake speed + port name sniff for Arduino-based controls.
 final int   SERIAL_BAUD        = 115200;
 final String SERIAL_HINT       = "usb|acm|modem|COM|tty";
+// SLUG_FILENAME: slug art the camera feed composites onto. Missing file falls back to gradient.
 final String SLUG_FILENAME     = "slug.png";
+// START_* toggles: how we boot into the workshop — mirror on for human-friendly UI, etc.
 final boolean START_MIRROR     = true;
+// SMOOTH_FACTOR: exponential smoothing of face positions so the slug doesn’t jitter.
 final float SMOOTH_FACTOR      = 0.25f;
+// DISPLAY_SCALE: scales down the composite slightly to leave room for UI chrome.
 final float DISPLAY_SCALE      = 0.90f;
+// CAMERA_RETRY_DELAY_MS: throttle for camera auto-retry when consent is granted mid-session.
 final int   CAMERA_RETRY_DELAY_MS = 2000;
 
+// Camera auto-recovery: how long to wait between retries and how many we’ll attempt.
 final int   CAM_RETRY_DELAY_MS = 1800;
 final int   CAM_AUTO_RETRY_MAX = 3;
 
+// Feathering: soft edge mask around the face crop; helps blend into the slug background.
 final boolean START_FEATHER    = true;
 final int     FEATHER_PX       = 60;
 
+// Consent modifiers: whether to gate recording on a face and whether auto recording boots hot.
 final boolean START_GATE_ON_FACE = true;
 final boolean START_AUTO_REC      = false;
 
+// Housekeeping: optionally delete old PNG captures so a workshop laptop can breathe.
 final boolean PRUNE_OLD_PNG     = false;
 final int     KEEP_MAX_PNG      = 800;
 
 // --- SAVE gestures (Arduino) ---
+// DOUBLE_TAP_MS: how long we wait for a second tap before promoting the first tap to SAVE.
 final int DOUBLE_TAP_MS = 1000;   // second SAVE within ≤1s = auto-confirm
 
 // --- Session review timeout (if not confirmed, delete) ---
+// SESSION_REVIEW_TIMEOUT_MS: fail-safe so unattended recordings self-delete.
 final int SESSION_REVIEW_TIMEOUT_MS = 15000; // 15s to confirm Keep
 
 // ------------------------------
 // STATE
 // ------------------------------
+// Live camera interface and detection helper.
 Capture cam;
 OpenCV  opencv;
 int     opencvW = -1;
 int     opencvH = -1;
+// Serial channel to the Arduino button board, and the video exporter for MP4 sessions.
 Serial  ard;
 VideoExport ve;
 
+// Visual buffers — the slug background, our off-screen composite, and the feathering mask.
 PImage slug;
 PGraphics composite;
 PImage featherMask;
 
+// Camera startup bookkeeping: track which device, whether it’s awake, and retry status.
 String cameraName = null;
 boolean camReady = false;
 boolean camUsingAutoConfig = false;
@@ -102,75 +122,87 @@ String  camStatusMsg = null;
 int     camAutoRetryCount = 0;
 long    camRetryAtMs = 0;
 
-// Consent gate: OFF by default
+// Consent gate: OFF by default. We only spin up hardware and file IO once this flips true.
 boolean consent = false;
 
-// Toggles
-boolean mirrorPreview = START_MIRROR;
-boolean debugOverlay  = false;
-boolean useFeather    = START_FEATHER;
-boolean gateOnFace    = START_GATE_ON_FACE;
-boolean autoRecOnFace = START_AUTO_REC;
+// Live toggles controlled by UI or workshop facilitators.
+boolean mirrorPreview = START_MIRROR; // human-friendly orientation
+boolean debugOverlay  = false;        // draw detection debug line work
+boolean useFeather    = START_FEATHER; // soften edges on the face crop
+boolean gateOnFace    = START_GATE_ON_FACE; // require a face to write frames
+boolean autoRecOnFace = START_AUTO_REC;     // robot cameraman mode
 
-// Face smoothing
+// Face smoothing: exponential averages for the latest face box so the overlay eases into place.
 float cx = -1, cy = -1, side = -1;
 boolean haveFace = false;
 int facePresentStreak = 0;
 int faceMissingStreak = 0;
 
-// Review overlay (PNG)
+// Review overlay (PNG) holds a RAM copy of the snapshot while the human decides its fate.
 boolean inReview = false;
 PImage  reviewFrame = null;
 String  reviewNote  = "";
 
-// Last saved PNG (for "Show/Delete")
+// Last saved PNG (for "Show/Delete") — we lazy-load the full image to avoid disk thrash.
 String lastSavedPath = null;
 PImage lastSavedThumb = null;
 PImage lastSavedFull  = null;
 
-// Recording state
+// Recording state: MP4 session metadata and counters for consent/timeouts.
 boolean recording = false;
 String  recordingFile = null;
 int     framesWrittenThisSession = 0;
 
-// Session file post-stop confirmation
+// Session file post-stop confirmation: modal that asks "keep or toss" after recording stops.
 boolean sessionReviewActive = false;
 String  sessionReviewPath   = null;
 long    sessionReviewDeadlineMs = 0;
 Btn     sessKeep = new Btn("sess_keep", "Keep", 0,0,0,0);
 Btn     sessDiscard = new Btn("sess_discard", "Discard", 0,0,0,0);
 
-// Avatar mode
+// Avatar mode is seeded so runs are deterministic unless the facilitator reshuffles.
 boolean avatarMode = false;
 long    avatarSeed = 1234567;
 Random  avatarRng  = new Random(avatarSeed);
 
-// UI buttons
+// UI buttons live in one list so we can iterate for drawing/hit-testing.
 ArrayList<Btn> buttons = new ArrayList<Btn>();
 
-// Double-tap tracking (serial-origin only)
+// Double-tap tracking (serial-origin only) pairs with Arduino’s SAVE → SAVE_DBL semantics.
 long lastSaveTapMs = -1;
 boolean reviewOpenedFromSerial = false;
 
-// Toast feedback
+// Toast feedback system — punk zine energy for ephemeral notes.
 String toastMsg = null;
 long toastUntilMs = 0;
 
 // ------------------------------
 // LIFECYCLE
 // ------------------------------
+/**
+ * settings() fires before setup(); we fix the canvas to a square so the slug art
+ * and the feathered face overlay stay pixel-perfect. Processing’s size() call
+ * lives here because the newer renderers demand it.
+ */
 void settings() { size(OUTPUT_SIZE, OUTPUT_SIZE); }
 
 void setup() {
+  // Window title is part workshop signage, part vibe check.
   surface.setTitle("Privacy-First Face/Avatar Composite — Teaching Build v2");
   frameRate(RECORD_FPS);
 
   // Camera
+  // -------
+  // We delay spinning up the camera until consent arrives. Here we just pick which
+  // device we *would* use and show a parked status message.
   cameraName = pickCamera();
   if (cameraName == null) { println("No camera found. Exiting."); exit(); }
   camStatusMsg = "Consent is OFF — camera parked.";
 
   // Slug & buffers
+  // ---------------
+  // Pull in the slug illustration (or synthesize a gradient fallback) and prep
+  // the off-screen composite surface plus the feather mask we reuse each frame.
   slug = loadImage(SLUG_FILENAME);
   if (slug == null) slug = fallbackSlug();
 
@@ -181,8 +213,9 @@ void setup() {
     FEATHER_PX
   );
 
-  setupSerial();
+  setupSerial(); // handshake with the Arduino button board (if one is plugged in)
 
+  // Make sure the capture + session folders exist before we try to write anything.
   new File(sketchPath("captures")).mkdirs();
   new File(sketchPath("sessions")).mkdirs();
 
@@ -200,6 +233,8 @@ void captureEvent(Capture c) {
   ensureOpenCVFor(c.width, c.height);
 
   if (!camReady) {
+    // First frame arrived. We treat this as the camera being officially live and
+    // clear any retry timers the consent system may have queued up.
     camReady = true;
     camStatusMsg = null;
     println("Camera streaming @ " + c.width + "x" + c.height + (camUsingAutoConfig ? " (auto config)" : ""));
@@ -224,6 +259,8 @@ void draw() {
   }
 
   // --- Detect & smooth ---
+  // Face detection stays framed as “math, not identity.” We only run the detector
+  // when avatarMode is off, otherwise we build a generative portrait.
   opencv.loadImage(cam);
   Rectangle chosen = null;
   if (!avatarMode) {
@@ -233,12 +270,15 @@ void draw() {
   updateFaceSmoothing(chosen);
 
   // Auto REC (file open/close), still consent-gated when writing frames
+  // If the facilitator toggled auto-record-on-face, this robot cameraman watches for
+  // a face streak and opens/closes MP4 files for them.
   if (autoRecOnFace) {
     if (!recording && facePresentStreak >= 6) startRecording();
     if (recording  && faceMissingStreak >= 12) stopRecording();
   }
 
   // --- Composite ---
+  // Render the slug base, optional face crop, or the procedural avatar.
   composite.beginDraw();
   composite.imageMode(CORNER);
   composite.image(slug, 0, 0, composite.width, composite.height);
@@ -251,7 +291,7 @@ void draw() {
     y0 = constrain(y0, 0, cam.height - sq);
 
     PImage crop = cam.get(x0, y0, sq, sq);
-    if (mirrorPreview) crop = mirrorImage(crop);
+    if (mirrorPreview) crop = mirrorImage(crop); // reflect horizontally to match mirrors/selfies
     crop.resize(OUTPUT_SIZE, OUTPUT_SIZE);
 
     if (useFeather) {
@@ -281,6 +321,7 @@ void draw() {
   image(composite, offsetX, offsetY, scaledW, scaledH);
 
   // --- UI: map + buttons + status ---
+  // Blend the teaching aids (data-flow map, consent buttons, debug status) on top.
   drawUIBackplates();
   drawDataFlowMap();
   drawTopButtons();
@@ -288,12 +329,14 @@ void draw() {
   if (debugOverlay) drawDebugPIP();
 
   // --- Overlays (modal) ---
+  // Modals trump the live preview. Each overlay explains what’s happening, by design.
   if (inReview) drawReviewOverlay();
   if (sessionReviewActive) drawSessionReviewOverlay();
   if (confirmDelete) drawDeleteConfirm();
   if (viewingLast) drawShowLast();
 
   // --- Recording: write frames only if consent (and optionally face present) ---
+  // Consent is a hard gate. The optional face gate means “no empty room B-roll.”
   boolean okToWrite = recording && consent && ve != null;
   boolean passGate  = !gateOnFace || haveFace || avatarMode;
   if (okToWrite && passGate) {
@@ -304,10 +347,22 @@ void draw() {
   drawToast();
 }
 
+/**
+ * cameraReadyForProcessing() centralizes our "is the camera safe to use?" logic.
+ * We require a Capture object, at least one frame read (camReady), and OpenCV to be
+ * configured. UI buttons rely on this so we don't invite folks to capture while the
+ * pipeline is half-built.
+ */
 boolean cameraReadyForProcessing() {
   return cam != null && camReady && opencv != null;
 }
 
+/**
+ * updateCameraStartupState() runs each frame to wrangle camera boot edges:
+ * - respect consent (no spinning if OFF)
+ * - retry with auto config when a custom resolution fails
+ * - schedule exponential-ish retries to avoid hammering USB drivers.
+ */
 void updateCameraStartupState() {
   if (!consent) return;
 
@@ -340,6 +395,10 @@ void updateCameraStartupState() {
   }
 }
 
+/**
+ * drawCameraStatusScreen() paints the "camera is sleeping/warming" panel. It's what
+ * participants see before consent or while the driver is negotiating settings.
+ */
 void drawCameraStatusScreen() {
   pushStyle();
   noStroke();
@@ -368,6 +427,10 @@ void drawCameraStatusScreen() {
   popStyle();
 }
 
+/**
+ * ensureOpenCVFor() lazily instantiates the OpenCV helper at the incoming capture size.
+ * Changing camera modes invalidates the instance, so we tear it down and rebuild.
+ */
 void ensureOpenCVFor(int w, int h) {
   if (opencv != null && opencvW == w && opencvH == h) return;
   opencv = new OpenCV(this, w, h);
@@ -385,6 +448,11 @@ void startCameraAuto() {
   startCamera(cameraName, 0, 0, true);
 }
 
+/**
+ * startCamera() is the single ingress for camera sessions. It stops any current stream,
+ * resets state, and spins up either a requested resolution (workshop default) or the
+ * vendor’s auto profile when the preferred mode flakes out.
+ */
 void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   if (name == null) return;
 
@@ -434,6 +502,10 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   }
 }
 
+/**
+ * scheduleAutoRetry() backs off camera restarts so a flaky USB hub doesn’t get DoS’d.
+ * Returns false when we’ve exhausted retries and should tell the facilitator to step in.
+ */
 boolean scheduleAutoRetry(String reason) {
   if (camAutoRetryCount >= CAM_AUTO_RETRY_MAX) {
     camStatusMsg = reason + " (check USB power/permissions and restart).";
@@ -471,6 +543,10 @@ class Btn {
 
 Btn btnConsent, btnCapture, btnAvatar, btnREC, btnShow, btnDelete;
 
+/**
+ * buildButtons() lays out the consent + action buttons at the top of the frame.
+ * The copy is intentionally explicit so facilitators can narrate what each control does.
+ */
 void buildButtons() {
   int pad=8, bw=120, bh=28, x=pad, y=pad;
   btnConsent = new Btn("consent", "Consent: OFF", x, y, bw, bh); x += bw + pad;
@@ -485,6 +561,11 @@ void buildButtons() {
   updateButtonLabels();
 }
 
+/**
+ * updateButtonLabels() syncs button text/enabled states with the latest consent +
+ * hardware conditions. It’s the subtle teacher that keeps reminding folks when
+ * actions are blocked (e.g., capture without consent).
+ */
 void updateButtonLabels() {
   btnConsent.label = "Consent: " + (consent ? "ON" : "OFF");
   if (!consent) {
@@ -501,6 +582,9 @@ void updateButtonLabels() {
   btnDelete.enabled= (lastSavedPath != null);
 }
 
+/**
+ * drawTopButtons() renders the top bar and highlights whichever controls are active.
+ */
 void drawTopButtons() {
   for (Btn b : buttons) {
     boolean active = (b==btnConsent && consent) || (b==btnAvatar && avatarMode) || (b==btnREC && recording);
@@ -508,6 +592,10 @@ void drawTopButtons() {
   }
 }
 
+/**
+ * mousePressed() routes clicks either to the modal overlays (if any) or to the top bar.
+ * We bail early if a modal is open so workshop participants stay in the current flow.
+ */
 void mousePressed() {
   // If a modal overlay is active, ignore top-bar clicks
   if (inReview || sessionReviewActive || confirmDelete || viewingLast) return;
@@ -524,10 +612,18 @@ void mousePressed() {
   }
 }
 
+/**
+ * toggleConsent() is a sugar helper so button + keyboard handlers can flip consent
+ * while reusing the toast copy.
+ */
 void toggleConsent(String toastOn, String toastOff) {
   setConsent(!consent, toastOn, toastOff);
 }
 
+/**
+ * setConsent() flips the consent gate and handles the side effects: spinning up the
+ * camera, shutting down recording, updating UI, and dropping toasts.
+ */
 void setConsent(boolean newState, String toastOn, String toastOff) {
   if (consent == newState) {
     if (consent && toastOn != null) toast(toastOn, 1200);
@@ -549,11 +645,19 @@ void setConsent(boolean newState, String toastOn, String toastOff) {
   updateButtonLabels();
 }
 
+/**
+ * startCameraIfNeeded() respects the intent to keep the camera parked until
+ * there’s consent and a known device.
+ */
 void startCameraIfNeeded() {
   if (cam != null || cameraName == null) return;
   startCameraPreferred();
 }
 
+/**
+ * shutdownCamera() is the full teardown path. We reset state so the next consent
+ * toggle starts from a clean slate (no stale detection boxes or recording flags).
+ */
 void shutdownCamera(String reason) {
   if (cam != null) {
     try { cam.stop(); }
@@ -588,11 +692,19 @@ Btn delYes = new Btn("del_yes","Delete",0,0,0,0);
 Btn delNo  = new Btn("del_no", "Cancel",0,0,0,0);
 boolean viewingLast = false;
 
+/**
+ * openReview() flips the PNG review modal on. We store the consent status so the
+ * overlay can explain why Save is disabled if consent is still OFF.
+ */
 void openReview() {
   inReview = true;
   reviewNote = consent ? "Confirm to save image." : "Consent is OFF — turn ON to enable saving.";
 }
 
+/**
+ * drawReviewOverlay() renders the RAM-only preview and action buttons. This is the
+ * heart of the consent conversation — nothing hits disk until Save is clicked.
+ */
 void drawReviewOverlay() {
   // Dim
   pushStyle(); noStroke(); fill(0, 180); rect(0,0,width,height); popStyle();
@@ -619,12 +731,20 @@ void drawReviewOverlay() {
   }
 }
 
+/**
+ * requestSave() is triggered by UI/keyboard. It pulls a frame into RAM (if the camera
+ * is ready) and opens the review modal. Serial double-taps reset their timer here too.
+ */
 void requestSave() {
   if (prepareReviewFrame(false)) {
     lastSaveTapMs = -1;
   }
 }
 
+/**
+ * commitSave() writes the reviewed PNG to disk and updates cached thumbnails. Consent
+ * is double-checked here because the overlay can stay open while someone toggles it off.
+ */
 void commitSave() {
   if (reviewFrame == null || !consent) { reviewNote = "Consent required to save."; return; }
   String fn = "captures/face-" + timestamp(true) + ".png";
@@ -639,6 +759,10 @@ void commitSave() {
   toast("Saved", 1200);
 }
 
+/**
+ * cancelReview() dismisses the modal without writing anything. We also clear the
+ * serial double-tap state so an Arduino tap sequence doesn’t leak across attempts.
+ */
 void cancelReview() {
   inReview = false;
   reviewFrame = null;
@@ -648,6 +772,10 @@ void cancelReview() {
 // ------------------------------
 // Session Review overlay (MP4 Keep/Discard with timeout)
 // ------------------------------
+/**
+ * drawSessionReviewOverlay() is the post-recording modal. Facilitators get a countdown
+ * to confirm the MP4, otherwise we auto-delete as part of the privacy promise.
+ */
 void drawSessionReviewOverlay() {
   // Auto-delete if timed out
   if (millis() > sessionReviewDeadlineMs) {
@@ -688,6 +816,9 @@ void drawSessionReviewOverlay() {
   }
 }
 
+/**
+ * deleteSessionFile() centralizes MP4 deletion so every path logs and toasts the result.
+ */
 void deleteSessionFile(String path, String msg) {
   if (path == null) return;
   File f = new File(sketchPath(path));
@@ -699,13 +830,27 @@ void deleteSessionFile(String path, String msg) {
 // ------------------------------
 // Show / Delete last PNG
 // ------------------------------
-void showLastSavedOverlay() { if (lastSavedPath != null) viewingLast = true; }
+/**
+ * showLastSavedOverlay() lets folks confirm what the system still remembers.
+ * We guard against null paths so stray button clicks don’t pop an empty modal.
+ */
+void showLastSavedOverlay() {
+  if (lastSavedPath != null) {
+    viewingLast = true;
+  }
+}
 
+/**
+ * confirmDeleteLast() opens the "are you sure" dialog for deleting the last PNG.
+ */
 void confirmDeleteLast() {
   if (lastSavedPath == null) return;
   confirmDelete = true;
 }
 
+/**
+ * drawDeleteConfirm() is the modal that lets someone back out or nuke their image forever.
+ */
 void drawDeleteConfirm() {
   pushStyle(); noStroke(); fill(0,180); rect(0,0,width,height); popStyle();
   int pw=420, ph=160, px=(width-pw)/2, py=(height-ph)/2;
@@ -724,6 +869,9 @@ void drawDeleteConfirm() {
   }
 }
 
+/**
+ * drawShowLast() renders the “show me my image” modal, complete with a manual close box.
+ */
 void drawShowLast() {
   pushStyle(); noStroke(); fill(0,180); rect(0,0,width,height); popStyle();
   int pw = width - 120, ph = height - 120, px = 60, py = 60;
@@ -753,12 +901,19 @@ void drawShowLast() {
   }
 }
 
+/**
+ * cacheLastSavedThumb() keeps a small copy around for the top-bar button preview.
+ */
 void cacheLastSavedThumb() {
   if (lastSavedPath == null) { lastSavedThumb=null; return; }
   PImage img = loadImageSafe(lastSavedPath);
   if (img != null) { lastSavedThumb = img.copy(); lastSavedThumb.resize(160, 160); }
 }
 
+/**
+ * deleteLastSaved() nukes the on-disk PNG and clears UI caches. This is a manual
+ * consent revocation moment, so we surface a toast confirming the result.
+ */
 void deleteLastSaved() {
   if (lastSavedPath == null) return;
   File f = new File(sketchPath(lastSavedPath));
@@ -768,6 +923,10 @@ void deleteLastSaved() {
   toast(ok ? "Deleted" : "Delete failed", 1200);
 }
 
+/**
+ * ensureLastSavedFull() lazily loads the full-resolution capture. We only hit disk when
+ * the modal is opened to keep the main loop snappy.
+ */
 PImage ensureLastSavedFull() {
   if (lastSavedPath == null) { lastSavedFull = null; return null; }
   if (lastSavedFull != null) return lastSavedFull;
@@ -775,6 +934,9 @@ PImage ensureLastSavedFull() {
   return lastSavedFull;
 }
 
+/**
+ * loadImageSafe() wraps Processing’s loadImage() to add logging and null-guarded paths.
+ */
 PImage loadImageSafe(String relPath) {
   if (relPath == null) return null;
   String fullPath = sketchPath(relPath);
@@ -789,6 +951,10 @@ PImage loadImageSafe(String relPath) {
 // ------------------------------
 // Serial (Arduino Uno w/ pin 13 pull-up switch)
 // ------------------------------
+/**
+ * setupSerial() enumerates serial ports, picks the likely Arduino, and attaches a
+ * newline-buffered listener. If nothing is connected we log the fallback path.
+ */
 void setupSerial() {
   String[] rawPorts = Serial.list();
   String[] ports = dedupeStringsCaseInsensitive(rawPorts);
@@ -810,6 +976,11 @@ void setupSerial() {
   catch(Exception e){ println("Serial error: "+e.getMessage()); ard=null; }
 }
 
+/**
+ * serialEvent() consumes Arduino button gestures and maps them to the consent workflow.
+ * SAVE vs SAVE_DBL mirrors the Processing UI flow so facilitators can swap between
+ * hardware and keyboard without confusion.
+ */
 void serialEvent(Serial s) {
   String line = s.readStringUntil('\n');
   if (line == null) return;
@@ -868,6 +1039,10 @@ void serialEvent(Serial s) {
   println("Unrecognized serial command: ["+line+"]");
 }
 
+/**
+ * requestSaveFromSerialTap() is the Arduino twin of requestSave(). We track timestamps
+ * so the next tap can promote the action to a double-press auto-save (when allowed).
+ */
 void requestSaveFromSerialTap() {
   if (prepareReviewFrame(true)) {
     lastSaveTapMs = millis();
@@ -876,6 +1051,10 @@ void requestSaveFromSerialTap() {
   }
 }
 
+/**
+ * prepareReviewFrame() copies the current composite into reviewFrame and opens the modal.
+ * When called from serial we record that fact so double-press logic can respond.
+ */
 boolean prepareReviewFrame(boolean fromSerial) {
   if (!cameraReadyForProcessing()) {
     String msg = consent ? "Camera is still waking up." : "Consent OFF → camera parked.";
@@ -890,6 +1069,10 @@ boolean prepareReviewFrame(boolean fromSerial) {
   return true;
 }
 
+/**
+ * drawToast() paints the floating message bar in the lower center of the frame.
+ * Toasts fade automatically once their deadline hits.
+ */
 void drawToast() {
   if (toastMsg == null) return;
   if (millis() >= toastUntilMs) { toastMsg = null; return; }
@@ -906,6 +1089,9 @@ void drawToast() {
   popStyle();
 }
 
+/**
+ * toast() queues a message for drawToast(). We store the future expiry so it self-clears.
+ */
 void toast(String msg, int ms) {
   toastMsg = msg;
   toastUntilMs = millis() + ms;
@@ -914,8 +1100,15 @@ void toast(String msg, int ms) {
 // ------------------------------
 // Recording
 // ------------------------------
+/**
+ * toggleRecording() flips between start/stop recording. A helper so UI + serial share code.
+ */
 void toggleRecording(){ if (recording) stopRecording(); else startRecording(); }
 
+/**
+ * startRecording() opens a new MP4 session file. Consent still gates writes later, so we
+ * start the file immediately but rely on the frame gate to keep it empty if folks decline.
+ */
 void startRecording() {
   if (recording) return;
   recordingFile = "sessions/session-" + timestamp(false) + ".mp4";
@@ -932,6 +1125,10 @@ void startRecording() {
   }
 }
 
+/**
+ * stopRecording() finalizes the MP4, enforces the zero-frame auto-delete, and opens the
+ * session review modal so folks can confirm or trash the clip.
+ */
 void stopRecording() {
   if (!recording) return;
   try {
@@ -961,6 +1158,10 @@ void stopRecording() {
 // ------------------------------
 // Keyboard
 // ------------------------------
+/**
+ * keyPressed() mirrors the button/serial controls so laptops without the Arduino rig
+ * still get the full experience. We intentionally map each action to a loud, mnemonic key.
+ */
 void keyPressed() {
   if (key == 's' || key=='S') requestSave();
   if (key == 'y' || key=='Y') { if (inReview && consent) commitSave(); }
@@ -984,6 +1185,10 @@ void keyPressed() {
 // ------------------------------
 // Teaching UI bits
 // ------------------------------
+/**
+ * drawUIBackplates() lays down translucent panels so the teaching text stays legible
+ * regardless of how wild the slug art or lighting gets.
+ */
 void drawUIBackplates() {
   // Keep the teaching overlay legible even when the slug art is loud.
   pushStyle();
@@ -998,6 +1203,10 @@ void drawUIBackplates() {
   popStyle();
 }
 
+/**
+ * drawDataFlowMap() prints the core consent flow in the corner. It’s the quick reference
+ * folks can point to during discussion.
+ */
 void drawDataFlowMap() {
   int x = 8, y = 8 + 28 + 8;
   pushStyle();
@@ -1011,6 +1220,10 @@ void drawDataFlowMap() {
   popStyle();
 }
 
+/**
+ * drawRECIndicator() shows both the REC light and whether frames are actually being written.
+ * The concentric ring only appears if the consent + face gates are satisfied.
+ */
 void drawRECIndicator() {
   boolean writing = (recording && consent && (!gateOnFace || haveFace || avatarMode) && ve!=null);
   pushStyle();
@@ -1025,6 +1238,10 @@ void drawRECIndicator() {
   popStyle();
 }
 
+/**
+ * drawDebugPIP() renders a mini picture-in-picture with the raw camera feed. Useful for
+ * facilitators troubleshooting framing, mirroring, or detection slop.
+ */
 void drawDebugPIP() {
   PImage camPrev = cam;
   if (mirrorPreview) camPrev = mirrorImage(camPrev);
@@ -1042,6 +1259,10 @@ void drawDebugPIP() {
 // ------------------------------
 // Face smoothing helpers
 // ------------------------------
+/**
+ * pickLargest() selects the biggest detected face — a crude but effective heuristic for
+ * single-subject workshops.
+ */
 Rectangle pickLargest(Rectangle[] faces) {
   if (faces == null || faces.length == 0) return null;
   Rectangle best = null; float area=-1;
@@ -1049,6 +1270,10 @@ Rectangle pickLargest(Rectangle[] faces) {
   return best;
 }
 
+/**
+ * updateFaceSmoothing() eases face positions toward the latest detection. It also tracks
+ * streaks so auto-record knows when someone has left the frame.
+ */
 void updateFaceSmoothing(Rectangle chosen) {
   if (avatarMode) { haveFace=false; faceMissingStreak++; facePresentStreak=0; return; }
   if (chosen != null) {
@@ -1073,6 +1298,10 @@ void updateFaceSmoothing(Rectangle chosen) {
 // ------------------------------
 // Avatar (procedural geometric portrait)
 // ------------------------------
+/**
+ * drawAvatar() is the privacy-friendly alt identity: a stack of jittered polygons whose
+ * randomness is seeded so participants can remix but also reset deterministically.
+ */
 void drawAvatar(PGraphics g, Random rng) {
   g.pushStyle();
   g.noStroke(); g.fill(0, 60); g.ellipse(g.width/2f, g.height/2f, g.width*0.9f, g.height*0.9f);
@@ -1102,6 +1331,9 @@ void drawAvatar(PGraphics g, Random rng) {
   g.popStyle();
 }
 
+/**
+ * polygon() is a helper that draws regular polygons with optional rotation.
+ */
 void polygon(PGraphics g, float cx, float cy, float r, int sides, float rot) {
   g.beginShape();
   for (int i=0;i<sides;i++) {
@@ -1114,6 +1346,9 @@ void polygon(PGraphics g, float cx, float cy, float r, int sides, float rot) {
 // ------------------------------
 // Helpers
 // ------------------------------
+/**
+ * mirrorImage() flips a frame horizontally — the "selfie view" everyone expects.
+ */
 PImage mirrorImage(PImage src) {
   PImage out = createImage(src.width, src.height, src.format);
   src.loadPixels(); out.loadPixels();
@@ -1125,6 +1360,10 @@ PImage mirrorImage(PImage src) {
   return out;
 }
 
+/**
+ * fallbackSlug() synthesizes a gentle gradient when the slug art is missing. Keeps the
+ * workshop rolling even if assets weren’t copied over.
+ */
 PImage fallbackSlug() {
   println("WARNING: Could not load " + SLUG_FILENAME + " — using generated gradient.");
   PImage img = createImage(64, 64, RGB);
@@ -1137,6 +1376,9 @@ PImage fallbackSlug() {
   return img;
 }
 
+/**
+ * makeRadialFeatherMask() builds a reusable alpha mask so the face crop eases into the slug.
+ */
 PImage makeRadialFeatherMask(int w, int h, float innerRadius, float featherPx) {
   PImage m = createImage(w, h, ALPHA); m.loadPixels();
   float cx = w*0.5f, cy = h*0.5f, outer = innerRadius + featherPx;
@@ -1155,6 +1397,10 @@ PImage makeRadialFeatherMask(int w, int h, float innerRadius, float featherPx) {
   m.updatePixels(); return m;
 }
 
+/**
+ * pickCamera() dedupes OS camera listings and returns the best match. USB Video Device is
+ * the usual suspect on Windows, but we fall back to the first camera otherwise.
+ */
 String pickCamera() {
   String[] raw = Capture.list();
   String[] cams = dedupeStringsCaseInsensitive(raw);
@@ -1175,6 +1421,10 @@ String pickCamera() {
   return cams[0];
 }
 
+/**
+ * dedupeStringsCaseInsensitive() collapses duplicate device names so Windows’ ghost
+ * entries don’t spam the UI. Preserves original casing for nicer logs.
+ */
 String[] dedupeStringsCaseInsensitive(String[] input) {
   if (input == null) return null;
   ArrayList<String> clean = new ArrayList<String>();
@@ -1191,12 +1441,19 @@ String[] dedupeStringsCaseInsensitive(String[] input) {
   return clean.toArray(new String[clean.size()]);
 }
 
+/**
+ * timestamp() returns sortable filenames. We optionally tack on milliseconds so PNG
+ * double-presses don’t collide.
+ */
 String timestamp(boolean includeMillis) {
   String t = nf(year(),4)+nf(month(),2)+nf(day(),2)+"-"+nf(hour(),2)+nf(minute(),2)+nf(second(),2);
   if (includeMillis) t += "-" + nf(millis()%1000,3);
   return t;
 }
 
+/**
+ * pruneCaptures() keeps disk usage chill by trimming oldest PNGs once KEEP_MAX_PNG is hit.
+ */
 void pruneCaptures() {
   File dir = new File(sketchPath("captures"));
   File[] files = dir.listFiles((d,f)->f.toLowerCase().endsWith(".png"));
@@ -1209,6 +1466,10 @@ void pruneCaptures() {
 // ------------------------------
 // Cleanup
 // ------------------------------
+/**
+ * dispose() is Processing’s shutdown hook. We stop recording, park the camera, and
+ * close serial so the OS doesn’t think another app is hogging the gear.
+ */
 void dispose() {
   stopRecording();
   shutdownCamera(null);

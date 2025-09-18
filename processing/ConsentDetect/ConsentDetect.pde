@@ -21,13 +21,19 @@ import java.io.File;
 // -------------------------------------------------------------
 // Configuration knobs
 // -------------------------------------------------------------
+// Camera setup: default to 720p so the detection math has enough pixels without crushing laptops.
 final int    CAM_W                 = 1280;
 final int    CAM_H                 = 720;
 final int    FRAME_RATE            = 30;
+// Captures live on disk temporarily — CAPTURE_TTL_MS enforces the "consent expires" promise.
 final int    CAPTURE_TTL_MS        = 5 * 60 * 1000; // 5 minutes
+// PRUNE_INTERVAL_MS determines how often we sweep for expired captures.
 final int    PRUNE_INTERVAL_MS     = 30 * 1000;     // sweep for expired captures
+// CAMERA_TIMEOUT_MS gives the preferred profile a chance before we fall back to auto config.
 final int    CAMERA_TIMEOUT_MS     = 3000;          // fallback to default profile
+// CAM_PREFERRED_HINT tries to grab the USB Video Device on Windows; we’ll gracefully fall back.
 final String CAM_PREFERRED_HINT    = "usb video device";
+// CAPTURE_PREFIX gives saved PNGs a recognizable, sortable name.
 final String CAPTURE_PREFIX        = "captures/consent-";
 
 // -------------------------------------------------------------
@@ -68,10 +74,17 @@ PFont     uiFont;
 // -------------------------------------------------------------
 // Lifecycle
 // -------------------------------------------------------------
+/**
+ * settings() runs before setup() and locks the canvas to the camera resolution so we can
+ * draw pixels 1:1 without scaling artifacts when showing the math overlay.
+ */
 void settings() {
   size(CAM_W, CAM_H);
 }
 
+/**
+ * setup() boots the workshop: fonts, consent state, capture directory, and camera scouting.
+ */
 void setup() {
   surface.setTitle("ConsentDetect — consent-first face detection");
   frameRate(FRAME_RATE);
@@ -93,6 +106,10 @@ void setup() {
   println("Controls: [c] consent, [space] capture, [y/n] review, [o] math overlay");
 }
 
+/**
+ * draw() is the main loop. It parks the camera until consent is granted, handles the
+ * detection overlay, and orchestrates modal overlays plus housekeeping sweeps.
+ */
 void draw() {
   background(18);
 
@@ -139,6 +156,10 @@ void draw() {
 // -------------------------------------------------------------
 // Camera plumbing
 // -------------------------------------------------------------
+/**
+ * captureEvent() fires whenever Processing pulls a new camera frame. We use it to mark
+ * the camera as "ready" and configure OpenCV the first time we see pixels.
+ */
 void captureEvent(Capture c) {
   c.read();
   camFramesSeen++;
@@ -152,6 +173,9 @@ void captureEvent(Capture c) {
   }
 }
 
+/**
+ * ensureOpenCVFor() rebuilds the OpenCV helper when the capture dimensions change.
+ */
 void ensureOpenCVFor(int w, int h) {
   if (opencv != null && opencvW == w && opencvH == h) return;
   opencv = new OpenCV(this, w, h);
@@ -161,14 +185,25 @@ void ensureOpenCVFor(int w, int h) {
   opencvH = h;
 }
 
+/**
+ * startCameraPreferred() boots the camera at our requested resolution. If it fails,
+ * startCamera() will fall back to the auto profile.
+ */
 void startCameraPreferred() {
   startCamera(false);
 }
 
+/**
+ * startCameraAuto() falls back to the vendor’s default profile when the explicit one flakes.
+ */
 void startCameraAuto() {
   startCamera(true);
 }
 
+/**
+ * startCamera() handles the heavy lifting: stops any existing stream, resets flags, and
+ * spins up Capture with either the preferred resolution or the auto profile.
+ */
 void startCamera(boolean autoConfig) {
   shutdownCamera(null);
 
@@ -201,6 +236,9 @@ void startCamera(boolean autoConfig) {
   }
 }
 
+/**
+ * shutdownCamera() tears down the camera + detection state so we can restart cleanly.
+ */
 void shutdownCamera(String reason) {
   if (cam != null) {
     try {
@@ -222,10 +260,16 @@ void shutdownCamera(String reason) {
   if (reason != null) camStatusMsg = reason;
 }
 
+/**
+ * cameraReadyForCapture() says “yes” only when consent is on and the camera is pumping frames.
+ */
 boolean cameraReadyForCapture() {
   return consent && cam != null && camReady;
 }
 
+/**
+ * updateCameraStartupState() watches for boot timeouts and schedules fallbacks.
+ */
 void updateCameraStartupState() {
   if (!consent) return;
   if (cam == null) return;
@@ -247,6 +291,10 @@ void updateCameraStartupState() {
   }
 }
 
+/**
+ * drawCameraStatus() shows the “camera waking up” panel once consent is on but frames
+ * haven’t arrived yet.
+ */
 void drawCameraStatus() {
   pushStyle();
   fill(14);
@@ -261,6 +309,10 @@ void drawCameraStatus() {
   popStyle();
 }
 
+/**
+ * drawParkedScreen() is the consent-off billboard. It makes the policy legible even
+ * before anyone presses a button.
+ */
 void drawParkedScreen() {
   pushStyle();
   fill(14);
@@ -277,12 +329,19 @@ void drawParkedScreen() {
 // -------------------------------------------------------------
 // Detection overlay
 // -------------------------------------------------------------
+/**
+ * updateDetections() pulls a fresh list of rectangles from OpenCV.
+ */
 void updateDetections() {
   if (opencv == null || cam == null) return;
   opencv.loadImage(cam);
   detections = opencv.detect();
 }
 
+/**
+ * drawDetectionOverlay() annotates the live feed with bounding boxes + dimensions so
+ * participants can talk about the math instead of identity guesses.
+ */
 void drawDetectionOverlay() {
   if (detections == null) return;
   pushStyle();
@@ -310,10 +369,17 @@ void drawDetectionOverlay() {
 // -------------------------------------------------------------
 // Consent + review handling
 // -------------------------------------------------------------
+/**
+ * toggleConsent() flips the consent gate; keyboard + mouse both route here.
+ */
 void toggleConsent() {
   setConsent(!consent);
 }
 
+/**
+ * setConsent() centralizes consent transitions. We log toasts, start/stop the camera,
+ * and dismiss any pending review captures.
+ */
 void setConsent(boolean newState) {
   if (consent == newState) {
     if (consent) toast("Consent already ON", 1000);
@@ -333,6 +399,9 @@ void setConsent(boolean newState) {
   }
 }
 
+/**
+ * requestCapture() stages a frame in RAM for review if the camera is awake and consent is on.
+ */
 void requestCapture() {
   if (!cameraReadyForCapture()) {
     String msg = consent ? "Camera is still waking up." : "Consent OFF — nothing captured.";
@@ -346,6 +415,9 @@ void requestCapture() {
   toast("Capture staged in RAM", 1200);
 }
 
+/**
+ * saveReviewFrame() commits the RAM capture to disk and refreshes the TTL sweep.
+ */
 void saveReviewFrame() {
   if (!inReview || reviewFrame == null) {
     toast("Nothing to save", 1000);
@@ -362,6 +434,9 @@ void saveReviewFrame() {
   pruneExpiredCaptures();
 }
 
+/**
+ * cancelReview() dismisses the review overlay without writing anything.
+ */
 void cancelReview() {
   inReview = false;
   reviewFrame = null;
@@ -371,11 +446,17 @@ void cancelReview() {
 // -------------------------------------------------------------
 // UI & interaction
 // -------------------------------------------------------------
+/**
+ * drawUI() wraps the consent badge plus HUD stats.
+ */
 void drawUI() {
   drawConsentBadge();
   drawHUDText();
 }
 
+/**
+ * drawConsentBadge() paints the clickable status pill that toggles consent.
+ */
 void drawConsentBadge() {
   pushStyle();
   fill(consent ? color(0, 160, 120) : color(160, 40, 40));
@@ -390,6 +471,9 @@ void drawConsentBadge() {
   popStyle();
 }
 
+/**
+ * drawHUDText() shows faces detected, overlay state, saved counts, and control cheat sheet.
+ */
 void drawHUDText() {
   pushStyle();
   fill(255);
@@ -406,6 +490,9 @@ void drawHUDText() {
   popStyle();
 }
 
+/**
+ * drawReviewOverlay() dims the screen and spotlights the RAM-only capture while folks decide.
+ */
 void drawReviewOverlay() {
   pushStyle();
   fill(0, 200);
@@ -430,6 +517,9 @@ void drawReviewOverlay() {
   popStyle();
 }
 
+/**
+ * mousePressed() only reacts to consent badge clicks — everything else is keyboard-driven.
+ */
 void mousePressed() {
   if (consentBtn.contains(mouseX, mouseY)) {
     toggleConsent();
@@ -437,6 +527,9 @@ void mousePressed() {
   }
 }
 
+/**
+ * keyPressed() maps the workshop controls to keys so the sketch stays accessible with or without a mouse.
+ */
 void keyPressed() {
   if (key == 'c' || key == 'C') { toggleConsent(); return; }
   if (key == 'o' || key == 'O') { showMath = !showMath; toast("Math overlay " + (showMath ? "ON" : "OFF"), 1200); return; }
@@ -448,12 +541,18 @@ void keyPressed() {
 // -------------------------------------------------------------
 // Capture retention helpers
 // -------------------------------------------------------------
+/**
+ * maybePruneExpiredCaptures() throttles TTL sweeps so we’re not hammering the disk every frame.
+ */
 void maybePruneExpiredCaptures() {
   if (millis() - lastPruneMs < PRUNE_INTERVAL_MS) return;
   pruneExpiredCaptures();
   lastPruneMs = millis();
 }
 
+/**
+ * pruneExpiredCaptures() deletes any captures beyond the TTL and tracks how many remain.
+ */
 void pruneExpiredCaptures() {
   File dir = new File(sketchPath("captures"));
   if (!dir.exists()) {
@@ -483,12 +582,18 @@ void pruneExpiredCaptures() {
 // -------------------------------------------------------------
 // Toast helpers
 // -------------------------------------------------------------
+/**
+ * toast() queues a message and logs it to the console for facilitators keeping notes.
+ */
 void toast(String msg, int durationMs) {
   toastMsg = msg;
   toastUntil = millis() + durationMs;
   println("[toast] " + msg);
 }
 
+/**
+ * drawToast() renders the toast banner and clears it once the timer expires.
+ */
 void drawToast() {
   if (toastMsg == null) return;
   if (millis() > toastUntil) {
@@ -512,6 +617,10 @@ void drawToast() {
 // -------------------------------------------------------------
 // Utilities
 // -------------------------------------------------------------
+/**
+ * pickCamera() scans available devices and picks the one that matches our workshop hint,
+ * falling back to common resolutions or the first camera.
+ */
 String pickCamera() {
   String[] cams = Capture.list();
   if (cams == null || cams.length == 0) return null;
@@ -525,6 +634,10 @@ String pickCamera() {
   return cams[0];
 }
 
+/**
+ * timestamp() generates sortable filenames; milliseconds help avoid collisions if folks
+ * hammer the save key.
+ */
 String timestamp(boolean includeMillis) {
   String t = nf(year(),4) + nf(month(),2) + nf(day(),2) + "-" + nf(hour(),2) + nf(minute(),2) + nf(second(),2);
   if (includeMillis) {
@@ -533,6 +646,9 @@ String timestamp(boolean includeMillis) {
   return t;
 }
 
+/**
+ * exit() cleans up camera resources before Processing shuts down.
+ */
 void exit() {
   shutdownCamera(null);
   super.exit();
