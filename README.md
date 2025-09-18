@@ -65,15 +65,15 @@ face-slug-privacy-teaching/
 
 ```mermaid
 graph LR
-    C(Camera) --> D[Detect (RAM)]
-    D --> R{Review}
-    R -- Save --> PNG[Write PNG]
-    R -- Discard --> X1[(No file)]
-    subgraph "Session Recording"
-      SR(REC ON) -->|Consent & optional face-gate| FW[Write frames]
-      SR -->|Stop| RS{Session Review}
-      RS -- Keep --> MP4[Keep MP4]
-      RS -- Discard/Timeout --> X2[(Delete MP4)]
+    camera[Camera] --> detect[Detect in RAM]
+    detect --> review{Review}
+    review -->|Save| png[Write PNG]
+    review -->|Discard| nofile[No file]
+    subgraph "Session recording"
+      rec_on([REC toggle on]) -->|Consent and optional face gate| writer[Write frames]
+      rec_on -->|Stop| session_review{Session review}
+      session_review -->|Keep| mp4[Keep MP4]
+      session_review -->|Discard or timeout| delete_mp4[Delete MP4]
     end
 ```
 
@@ -88,19 +88,20 @@ sequenceDiagram
 
   BTN->>MCU: Press SAVE
   MCU->>Host: SAVE
-  Host->>Host: Capture preview (RAM); open Review
+  Host->>Host: Capture preview in RAM
+  Host->>Host: Open review overlay
 
-  BTN->>MCU: Second press (<= 1s)
+  BTN->>MCU: Second press within one second
   MCU->>Host: SAVE_DBL
   alt Consent ON
     Host->>FS: Save PNG immediately
   else Consent OFF
-    Host->>Host: Remain in Review; prompt for consent
+    Host->>Host: Stay in review and prompt for consent
   end
 
-  BTN->>MCU: Long-press SAVE (>= 1.5s)
+  BTN->>MCU: Long press SAVE for at least 1.5 s
   MCU->>Host: CONSENT_TOGGLE
-  Host->>Host: Consent flips ON <-> OFF
+  Host->>Host: Flip consent state
 ```
 
 ## License
