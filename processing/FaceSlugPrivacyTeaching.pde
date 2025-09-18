@@ -528,7 +528,10 @@ void deleteLastSaved() {
 // ------------------------------
 void setupSerial() {
   String[] ports = Serial.list();
-  if (ports == null || ports.length == 0) { println("No serial ports found."); return; }
+  if (ports == null || ports.length == 0) {
+    println("No serial ports found — keyboard/mouse controls stay live. Plug in the workshop Arduino and restart when ready.");
+    return;
+  }
   println("Serial ports:");
   for (int i=0;i<ports.length;i++) println("  ["+i+"] "+ports[i]);
 
