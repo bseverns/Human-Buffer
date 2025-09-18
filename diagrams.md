@@ -7,9 +7,9 @@
 stateDiagram-v2
   [*] --> Idle
   Idle --> Review : SAVE (first press)
-  Review --> Saved : SAVE_DBL (≤1s) / Consent ON
+  Review --> Saved : SAVE_DBL (<=1s) / Consent ON
   Review --> Review : SAVE_DBL / Consent OFF
-  Review --> Saved : "Save" button (Consent ON)
+  Review --> Saved : Save button (Consent ON)
   Review --> Idle  : Discard
   Saved --> Idle
 ```

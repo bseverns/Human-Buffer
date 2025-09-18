@@ -69,7 +69,7 @@ flowchart LR
     D --> R{Review}
     R -- Save --> PNG[Write PNG]
     R -- Discard --> X1[(No file)]
-    subgraph Session Recording
+    subgraph "Session Recording"
       SR(REC ON) -->|Consent & optional face-gate| FW[Write frames]
       SR -->|Stop| RS{Session Review}
       RS -- Keep --> MP4[Keep MP4]
@@ -84,12 +84,13 @@ sequenceDiagram
   participant BTN as Arduino Button
   participant MCU as Arduino
   participant Host as Processing Sketch
+  participant FS as FileSystem
 
   BTN->>MCU: Press SAVE
   MCU->>Host: "SAVE"
   Host->>Host: Capture preview (RAM); open Review
 
-  BTN->>MCU: Second press (≤ 1s)
+  BTN->>MCU: Second press (<= 1s)
   MCU->>Host: "SAVE_DBL"
   alt Consent ON
     Host->>FS: Save PNG immediately
@@ -97,9 +98,9 @@ sequenceDiagram
     Host->>Host: Remain in Review; prompt for consent
   end
 
-  BTN->>MCU: Long-press SAVE (≥1.5s)
+  BTN->>MCU: Long-press SAVE (>=1.5s)
   MCU->>Host: "CONSENT_TOGGLE"
-  Host->>Host: Consent flips ON↔OFF
+  Host->>Host: Consent flips ON<->OFF
 ```
 
 ## License
