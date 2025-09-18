@@ -57,6 +57,7 @@ final String SLUG_FILENAME     = "slug.png";
 final boolean START_MIRROR     = true;
 final float SMOOTH_FACTOR      = 0.25f;
 final float DISPLAY_SCALE      = 0.90f;
+final int   CAMERA_RETRY_DELAY_MS = 2000;
 
 final int   CAM_RETRY_DELAY_MS = 1800;
 final int   CAM_AUTO_RETRY_MAX = 3;
