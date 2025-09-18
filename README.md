@@ -65,14 +65,14 @@ face-slug-privacy-teaching/
 
 ```mermaid
 graph LR
-    C(Camera) --> D[Detect (RAM)]
+    C[(Camera)] --> D["Detect in RAM"]
     D --> R{Review}
-    R -- Save --> PNG[Write PNG]
+    R -- Save --> PNG[[Write PNG]]
     R -- Discard --> X1[(No file)]
     subgraph "Session Recording"
-      SR(REC ON) -->|Consent & optional face-gate| FW[Write frames]
-      SR -->|Stop| RS{Session Review}
-      RS -- Keep --> MP4[Keep MP4]
+      SR([REC ON]) -->|Consent + optional gate| FW[[Write frames]]
+      SR -->|Stop| RS{Session review}
+      RS -- Keep --> MP4[[Keep MP4]]
       RS -- Discard/Timeout --> X2[(Delete MP4)]
     end
 ```
@@ -88,19 +88,20 @@ sequenceDiagram
 
   BTN->>MCU: Press SAVE
   MCU->>Host: SAVE
-  Host->>Host: Capture preview (RAM); open Review
+  Host->>Host: Capture preview in RAM
+  Host->>Host: Open review overlay
 
   BTN->>MCU: Second press (<= 1s)
   MCU->>Host: SAVE_DBL
   alt Consent ON
     Host->>FS: Save PNG immediately
   else Consent OFF
-    Host->>Host: Remain in Review; prompt for consent
+    Host->>Host: Remain in review and prompt for consent
   end
 
   BTN->>MCU: Long-press SAVE (>= 1.5s)
   MCU->>Host: CONSENT_TOGGLE
-  Host->>Host: Consent flips ON <-> OFF
+  Host->>Host: Flip consent state
 ```
 
 ## License

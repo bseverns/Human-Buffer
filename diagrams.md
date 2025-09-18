@@ -18,18 +18,29 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-  start([REC toggle ON]) --> consent{Consent ON?}
+  start([REC toggle ON])
+  consent{Consent ON?}
+  gate{Gate on face?}
+  present{Face present?}
+  writer["Write frames every draw()"]
+  stop([REC toggle OFF])
+  written{Frames written > 0?}
+  review{"Session Review"\nKeep or Discard}
+  keep[[Keep MP4]]
+  delete[[Delete empty MP4]]
+
+  start --> consent
   consent -- No --> start
-  consent -- Yes --> gate{Gate on face?}
-  gate -- No --> writer[Write frames every draw()]
-  gate -- Yes --> present{Face present?}
+  consent -- Yes --> gate
+  gate -- No --> writer
+  gate -- Yes --> present
   present -- Yes --> writer
   present -- No --> start
-  writer --> stop([REC toggle OFF])
-  stop --> written{Frames written > 0?}
-  written -- No --> delete[Delete empty MP4]
-  written -- Yes --> review{Session Review Keep/Discard}
-  review -- Keep --> keep[Keep MP4]
+  writer --> stop
+  stop --> written
+  written -- No --> delete
+  written -- Yes --> review
+  review -- Keep --> keep
   review -- Discard/Timeout --> delete
 ```
 
@@ -37,10 +48,10 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  camera[[Camera]] --> detect[OpenCV Detect]
-  detect --> composite[Composite over Slug]
-  composite --> ui[UI Overlays (buttons/map/toasts)]
-  ui -->|Consent-gated| disk[(Disk PNG/MP4)]
+  camera[[Camera]] --> detect["OpenCV Detect"]
+  detect --> composite["Composite over slug"]
+  composite --> ui["UI overlays"\nbuttons / map / toasts]
+  ui -->|Consent gated| disk[(Disk PNG/MP4)]
 ```
 
 ## D. Serial interactions
@@ -52,7 +63,7 @@ sequenceDiagram
   participant FS as FileSystem
 
   Arduino->>Processing: SAVE
-  Processing->>Processing: Open Review overlay (RAM only)
+  Processing->>Processing: Open review overlay (RAM only)
 
   Arduino->>Processing: SAVE_DBL
   alt Consent ON
