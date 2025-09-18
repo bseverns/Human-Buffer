@@ -108,6 +108,7 @@ String  reviewNote  = "";
 // Last saved PNG (for "Show/Delete")
 String lastSavedPath = null;
 PImage lastSavedThumb = null;
+PImage lastSavedFull  = null;
 
 // Recording state
 boolean recording = false;
@@ -395,6 +396,7 @@ void commitSave() {
   reviewFrame.save(fn);
   println("Saved PNG: " + fn);
   lastSavedPath = fn;
+  lastSavedFull = null; // lazy reload on demand (ensures path changes bust cache)
   cacheLastSavedThumb();
   if (PRUNE_OLD_PNG) pruneCaptures();
   inReview = false; reviewFrame = null;
@@ -492,8 +494,16 @@ void drawShowLast() {
   int pw = width - 120, ph = height - 120, px = 60, py = 60;
   pushStyle(); fill(20); stroke(200); rect(px,py,pw,ph,14); popStyle();
 
-  PImage img = loadImage(lastSavedPath);
-  if (img != null) image(img, px+20, py+20, pw-40, ph-80);
+  PImage img = ensureLastSavedFull();
+  if (img != null) {
+    image(img, px+20, py+20, pw-40, ph-80);
+  } else {
+    fill(255, 120, 120);
+    textAlign(CENTER, CENTER);
+    textSize(16);
+    text("Couldn't load last saved image.\nCheck that the capture still exists.", px+pw/2, py+ph/2);
+    textAlign(LEFT, CENTER);
+  }
 
   fill(255); textAlign(LEFT, CENTER); textSize(12);
   text("Viewing: " + lastSavedPath, px+20, py+ph-40);
@@ -510,7 +520,7 @@ void drawShowLast() {
 
 void cacheLastSavedThumb() {
   if (lastSavedPath == null) { lastSavedThumb=null; return; }
-  PImage img = loadImage(lastSavedPath);
+  PImage img = loadImageSafe(lastSavedPath);
   if (img != null) { lastSavedThumb = img.copy(); lastSavedThumb.resize(160, 160); }
 }
 
@@ -519,8 +529,26 @@ void deleteLastSaved() {
   File f = new File(sketchPath(lastSavedPath));
   boolean ok = f.delete();
   println(ok ? "Deleted: " + lastSavedPath : "Delete failed: " + lastSavedPath);
-  lastSavedPath = null; lastSavedThumb = null; updateButtonLabels();
+  lastSavedPath = null; lastSavedThumb = null; lastSavedFull = null; updateButtonLabels();
   toast(ok ? "Deleted" : "Delete failed", 1200);
+}
+
+PImage ensureLastSavedFull() {
+  if (lastSavedPath == null) { lastSavedFull = null; return null; }
+  if (lastSavedFull != null) return lastSavedFull;
+  lastSavedFull = loadImageSafe(lastSavedPath);
+  return lastSavedFull;
+}
+
+PImage loadImageSafe(String relPath) {
+  if (relPath == null) return null;
+  String fullPath = sketchPath(relPath);
+  if (fullPath == null) return null;
+  PImage img = loadImage(fullPath);
+  if (img == null) {
+    println("loadImage failed for: " + fullPath);
+  }
+  return img;
 }
 
 // ------------------------------
