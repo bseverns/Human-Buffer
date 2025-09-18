@@ -1010,6 +1010,14 @@ PImage makeRadialFeatherMask(int w, int h, float innerRadius, float featherPx) {
 
 String pickCamera() {
   String[] cams = Capture.list(); if (cams == null || cams.length == 0) return null;
+
+  String preferredName = "usb video device";
+  for (String c : cams) {
+    if (c.toLowerCase().contains(preferredName)) {
+      return c;
+    }
+  }
+
   for (String c : cams) if (c.toLowerCase().contains("1280x720"))  return c;
   for (String c : cams) if (c.toLowerCase().contains("1920x1080")) return c;
   return cams[0];
