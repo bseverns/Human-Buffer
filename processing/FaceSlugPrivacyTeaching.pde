@@ -747,10 +747,15 @@ void requestSave() {
  */
 void commitSave() {
   if (reviewFrame == null || !consent) { reviewNote = "Consent required to save."; return; }
-  String fn = "captures/face-" + timestamp(true) + ".png";
-  reviewFrame.save(fn);
-  println("Saved PNG: " + fn);
-  lastSavedPath = fn;
+  String relPath = nextCaptureRelPath();
+  if (!saveCaptureImage(reviewFrame, relPath)) {
+    reviewNote = "Save failed — check storage.";
+    toast("Save failed", 1600);
+    return;
+  }
+
+  println("Saved PNG: " + relPath);
+  lastSavedPath = relPath;
   lastSavedFull = null; // lazy reload on demand (ensures path changes bust cache)
   cacheLastSavedThumb();
   if (PRUNE_OLD_PNG) pruneCaptures();
@@ -1009,12 +1014,15 @@ void serialEvent(Serial s) {
             return;
           }
           PImage snap = composite.get();
-          String fn = "captures/face-" + timestamp(true) + ".png";
-          snap.save(fn);
-          println("Saved PNG: " + fn);
-          lastSavedPath = fn;
-          cacheLastSavedThumb();
-          updateButtonLabels();
+          String relPath = nextCaptureRelPath();
+          if (saveCaptureImage(snap, relPath)) {
+            println("Saved PNG: " + relPath);
+            lastSavedPath = relPath;
+            cacheLastSavedThumb();
+            updateButtonLabels();
+          } else {
+            toast("Save failed", 1600);
+          }
         }
         toast("Saved (double-press)", 1500);
       } else {
@@ -1067,6 +1075,38 @@ boolean prepareReviewFrame(boolean fromSerial) {
   openReview();
   reviewOpenedFromSerial = fromSerial;
   return true;
+}
+
+String nextCaptureRelPath() {
+  return "captures/face-" + timestamp(true) + ".png";
+}
+
+boolean saveCaptureImage(PImage img, String relPath) {
+  if (img == null || relPath == null) return false;
+
+  String absPath = sketchPath(relPath);
+  if (absPath == null) {
+    println("Save failed — sketchPath returned null for " + relPath);
+    return false;
+  }
+
+  File outFile = new File(absPath);
+  File parent = outFile.getParentFile();
+  if (parent != null && !parent.exists()) {
+    boolean ok = parent.mkdirs();
+    if (!ok && !parent.exists()) {
+      println("Save failed — couldn't create directory: " + parent.getAbsolutePath());
+      return false;
+    }
+  }
+
+  try {
+    img.save(absPath);
+    return true;
+  } catch(Exception e) {
+    println("Save failed — " + e.getMessage());
+    return false;
+  }
 }
 
 /**
