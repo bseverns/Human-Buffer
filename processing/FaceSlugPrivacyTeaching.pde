@@ -85,6 +85,7 @@ final boolean START_AUTO_REC      = false;
 final String OS_NAME = System.getProperty("os.name").toLowerCase();
 final boolean ON_WINDOWS = OS_NAME.contains("win");
 final boolean ON_MAC = OS_NAME.contains("mac");
+final boolean ON_LINUX = !ON_WINDOWS && !ON_MAC;
 
 // Housekeeping: optionally delete old PNG captures so a workshop laptop can breathe.
 final boolean PRUNE_OLD_PNG     = false;
@@ -446,7 +447,11 @@ void ensureOpenCVFor(int w, int h) {
 }
 
 void startCameraPreferred() {
-  startCamera(cameraName, CAM_W, CAM_H, false);
+  if (cameraName != null && cameraName.toLowerCase().startsWith("pipeline:")) {
+    startCamera(cameraName, 0, 0, true);
+  } else {
+    startCamera(cameraName, CAM_W, CAM_H, false);
+  }
 }
 
 void startCameraAuto() {
@@ -472,9 +477,10 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   camReady = false;
   camFramesSeen = 0;
   camStartAttemptMs = millis();
-  camUsingAutoConfig = autoConfig;
-  camFallbackAttempted = autoConfig ? true : false;
-  if (!autoConfig) {
+  boolean usingPipeline = name.toLowerCase().startsWith("pipeline:");
+  camUsingAutoConfig = autoConfig || usingPipeline;
+  camFallbackAttempted = camUsingAutoConfig ? true : false;
+  if (!autoConfig || usingPipeline) {
     camAutoRetryCount = 0;
   }
   camRetryAtMs = 0;
@@ -484,7 +490,11 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   opencvH = -1;
 
   try {
-    if (autoConfig) {
+    if (usingPipeline) {
+      println("Starting camera via pipeline: " + name + (reqW > 0 && reqH > 0 ? " (ignoring " + reqW + "x" + reqH + ")" : ""));
+      cam = new Capture(this, name);
+      camStatusMsg = "Starting camera via pipeline…";
+    } else if (autoConfig) {
       println("Starting camera with default profile: " + name);
       cam = new Capture(this, name);
       camStatusMsg = "Starting camera (auto config)…";
@@ -498,7 +508,7 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
     println("Camera init exception: " + e.getMessage());
     camStatusMsg = "Camera init failed: " + e.getMessage();
     cam = null;
-    if (!autoConfig && !camFallbackAttempted) {
+    if (!usingPipeline && !autoConfig && !camFallbackAttempted) {
       println("Retrying camera with default profile.");
       startCameraAuto();
     } else if (autoConfig) {
@@ -1457,7 +1467,13 @@ PImage makeRadialFeatherMask(int w, int h, float innerRadius, float featherPx) {
 String pickCamera() {
   String[] raw = Capture.list();
   String[] cams = dedupeStringsCaseInsensitive(raw);
-  if (cams == null || cams.length == 0) return null;
+  if (cams == null || cams.length == 0) {
+    if (ON_LINUX) {
+      println("Camera list empty — defaulting to pipeline:autovideosrc (GStreamer auto source).");
+      return "pipeline:autovideosrc";
+    }
+    return null;
+  }
   if (raw != null && cams.length != raw.length) {
     println("Camera list deduped (" + raw.length + " → " + cams.length + ") to avoid ghost entries.");
   }
@@ -1491,8 +1507,15 @@ String pickCamera() {
     }
   }
 
+  for (String c : cams) if (c.toLowerCase().contains("pipeline:")) return c;
   for (String c : cams) if (c.toLowerCase().contains("1280x720"))  return c;
   for (String c : cams) if (c.toLowerCase().contains("1920x1080")) return c;
+
+  if (ON_LINUX) {
+    println("No explicit Linux camera match — defaulting to pipeline:autovideosrc.");
+    return "pipeline:autovideosrc";
+  }
+
   return cams[0];
 }
 
