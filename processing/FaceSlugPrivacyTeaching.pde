@@ -82,6 +82,10 @@ final int     FEATHER_PX       = 60;
 final boolean START_GATE_ON_FACE = true;
 final boolean START_AUTO_REC      = false;
 
+final String OS_NAME = System.getProperty("os.name").toLowerCase();
+final boolean ON_WINDOWS = OS_NAME.contains("win");
+final boolean ON_MAC = OS_NAME.contains("mac");
+
 // Housekeeping: optionally delete old PNG captures so a workshop laptop can breathe.
 final boolean PRUNE_OLD_PNG     = false;
 final int     KEEP_MAX_PNG      = 800;
@@ -420,9 +424,10 @@ void drawCameraStatusScreen() {
     text("Toggle Consent (button or 'c') to wake the camera.", width/2f, height/2f + 24);
   } else if (camUsingAutoConfig && camFramesSeen == 0) {
     textSize(12);
-    String extra = "Windows' ksvideosrc (0x00000020) warning usually means another app owns the camera\n" +
-                   "or the driver rejected the requested resolution. Unplug/replug or drop other capture apps.";
-    text(extra, width/2f, height/2f + 32);
+    String extra = cameraWarmupHelpMessage();
+    if (extra != null && extra.length() > 0) {
+      text(extra, width/2f, height/2f + 32);
+    }
   }
   popStyle();
 }
@@ -508,7 +513,15 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
  */
 boolean scheduleAutoRetry(String reason) {
   if (camAutoRetryCount >= CAM_AUTO_RETRY_MAX) {
-    camStatusMsg = reason + " (check USB power/permissions and restart).";
+    String tail;
+    if (ON_MAC) {
+      tail = "Check macOS camera privacy permissions or wake your Continuity Camera device, then restart the sketch.";
+    } else if (ON_WINDOWS) {
+      tail = "Confirm no other app owns the webcam or try a different USB port, then restart.";
+    } else {
+      tail = "Check USB power/permissions and restart.";
+    }
+    camStatusMsg = reason + " (" + tail + ")";
     return false;
   }
 
@@ -1449,16 +1462,48 @@ String pickCamera() {
     println("Camera list deduped (" + raw.length + " → " + cams.length + ") to avoid ghost entries.");
   }
 
-  String preferredName = "usb video device";
-  for (String c : cams) {
-    if (c.toLowerCase().contains(preferredName)) {
-      return c;
+  if (ON_MAC) {
+    String[] macPrefs = {
+      "facetime hd",
+      "continuity camera",
+      "iphone",
+      "obs virtual"
+    };
+    for (String pref : macPrefs) {
+      for (String c : cams) {
+        if (c.toLowerCase().contains(pref)) {
+          return c;
+        }
+      }
+    }
+  } else if (ON_WINDOWS) {
+    String[] winPrefs = {
+      "usb video device",
+      "integrated webcam",
+      "hd webcam"
+    };
+    for (String pref : winPrefs) {
+      for (String c : cams) {
+        if (c.toLowerCase().contains(pref)) {
+          return c;
+        }
+      }
     }
   }
 
   for (String c : cams) if (c.toLowerCase().contains("1280x720"))  return c;
   for (String c : cams) if (c.toLowerCase().contains("1920x1080")) return c;
   return cams[0];
+}
+
+String cameraWarmupHelpMessage() {
+  if (ON_WINDOWS) {
+    return "Windows' ksvideosrc (0x00000020) warning usually means another app owns the camera\nor the driver rejected the requested resolution. Unplug/replug or close other capture apps.";
+  }
+  if (ON_MAC) {
+    return "macOS might still be waiting for you to grant camera access. Hit System Settings → Privacy & Security → Camera and enable Processing. If you're leaning on Continuity Camera, wake the phone.";
+  }
+  return "If the camera never wakes, close other capture apps and double-check USB power or permissions.";
 }
 
 /**
