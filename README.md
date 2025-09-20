@@ -38,6 +38,35 @@ A Processing + Arduino sketch that doubles as a workshop kit on community consen
 - **Continuity Camera heads-up.** If you’re using an iPhone as the webcam, wake/unlock it before flipping consent on; otherwise macOS reports the device but never streams.
 - **Virtual cams** (OBS, Zoom, etc.) register fine — the sketch now hunts for names like “OBS Virtual Camera” out of the box.
 
+## When the sketch throws a tantrum (aka troubleshooting)
+
+You’re not cursed; computers are just dramatic. Run through these common trip wires before you sacrifice more coffee to the debugging gods.
+
+### OS & driver purgatory
+
+- **Ancient operating systems**: Windows 7/8 and macOS pre-12 ship crusty media stacks that the Video and OpenCV libraries no longer target. Upgrade the host OS or run the sketch from a newer machine/VM.
+- **Half-baked updates**: If you just upgraded macOS or Windows and the camera mysteriously vanished, finish the update (extra restarts, optional security patches) so the OS re-registers AVFoundation / Media Foundation.
+- **GPU + camera drivers**: Integrated GPUs starving for updates can crash Processing on launch. Visit Intel/NVIDIA/AMD for current drivers; on macOS this piggybacks the system update.
+
+### Resource bottlenecks
+
+- **Low RAM**: The sketch allocates buffers for live video + avatar assets. Dip below ~4 GB free and Java’s garbage collector will thrash, producing “OutOfMemoryError” in the Processing console. Close Chrome, OBS, or any RAM hoarders before retrying.
+- **Disk cliffs**: Session captures write PNGs/MP4s on demand. If the drive is nearly full or sandboxed (hello, school lab profiles), the save dialog will silently fail. Clear space or point the sketch to a writable folder via **File → Preferences → Sketchbook location**.
+- **CPU contention**: OBS, Zoom, and browser-based ML demos can hog CPU cycles. When the frame rate tanks, pause those apps or lower their priority so the sketch can breathe.
+
+### Peripheral politics
+
+- **Camera already booked**: If another app (Teams, FaceTime, browser tab) already owns the webcam, Processing just shrugs. Quit the other app or pick a different camera in the sketch’s device picker.
+- **USB bus overload**: Daisy-chained webcams + capture cards on an unpowered hub will brown out. Plug the critical camera directly into the machine or use a powered hub.
+- **Arduino serial musical chairs**: On Windows the virtual COM port number can bounce. If the optional hardware stops talking, reopen the sketch after checking the correct port in **Tools → Port**.
+
+### Security lockdowns
+
+- **Enterprise admin policies**: School and corporate builds often gate camera access or block unsigned serial drivers. Loop in IT to whitelist Processing and (if needed) install the Arduino drivers with admin privileges.
+- **Antivirus crankiness**: Real-time scanners can quarantine the VideoExport temp files. Add the Processing sketch folder to the allowlist.
+
+Still stuck? Drop notes in `notes/` so future facilitators inherit the wisdom (and the punk spirit).
+
 ## Controls
 
 - **Buttons (top bar):** Consent, Avatar, REC, Show my image, Delete now
