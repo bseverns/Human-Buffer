@@ -1,9 +1,9 @@
 cff-version: 1.2.0
-title: "faceTimes"
+title: "Human-Buffer"
 message: "If you use this repo, cite it punk-style."
 authors:
-  - family-names: Doe
-    given-names: Jane
-    orcid: "0000-0000-0000-0000"
-release-date: 2024-01-01
+  - family-names: Severns
+    given-names: Ben
+    orcid: "0000-0070-0420-0010"
+release-date: 2025-03-01
 version: "0.1.0"
