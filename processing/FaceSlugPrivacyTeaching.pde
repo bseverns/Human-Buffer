@@ -118,6 +118,7 @@ PImage featherMask;
 
 // Camera startup bookkeeping: track which device, whether it’s awake, and retry status.
 String cameraName = null;
+String cameraPrimaryName = null;
 boolean camReady = false;
 boolean camUsingAutoConfig = false;
 boolean camFallbackAttempted = false;
@@ -126,6 +127,8 @@ int     camFramesSeen = 0;
 String  camStatusMsg = null;
 int     camAutoRetryCount = 0;
 long    camRetryAtMs = 0;
+boolean macPipelineFallbackArmed = false;
+boolean macPipelineFallbackActive = false;
 
 // Consent gate: OFF by default. We only spin up hardware and file IO once this flips true.
 boolean consent = false;
@@ -201,6 +204,7 @@ void setup() {
   // We delay spinning up the camera until consent arrives. Here we just pick which
   // device we *would* use and show a parked status message.
   cameraName = pickCamera();
+  cameraPrimaryName = cameraName;
   if (cameraName == null) { println("No camera found. Exiting."); exit(); }
   camStatusMsg = "Consent is OFF — camera parked.";
 
@@ -478,12 +482,18 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   camFramesSeen = 0;
   camStartAttemptMs = millis();
   boolean usingPipeline = name.toLowerCase().startsWith("pipeline:");
+  boolean usingMacFallback = usingPipeline && name.toLowerCase().startsWith("pipeline:avfvideosrc");
   camUsingAutoConfig = autoConfig || usingPipeline;
   camFallbackAttempted = camUsingAutoConfig ? true : false;
   if (!autoConfig || usingPipeline) {
     camAutoRetryCount = 0;
   }
   camRetryAtMs = 0;
+  if (usingMacFallback) {
+    macPipelineFallbackActive = true;
+  } else if (!usingPipeline) {
+    macPipelineFallbackActive = false;
+  }
 
   opencv = null;
   opencvW = -1;
@@ -523,6 +533,20 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
  */
 boolean scheduleAutoRetry(String reason) {
   if (camAutoRetryCount >= CAM_AUTO_RETRY_MAX) {
+    if (ON_MAC && !macPipelineFallbackActive) {
+      if (!macPipelineFallbackArmed) {
+        String pipeline = buildMacPipelineFallback();
+        if (pipeline != null) {
+          macPipelineFallbackArmed = true;
+          cameraName = pipeline;
+          camAutoRetryCount = 0;
+          camRetryAtMs = millis() + CAM_RETRY_DELAY_MS;
+          camStatusMsg = reason + " Retrying with macOS AVFoundation fallback…";
+          println("macOS camera fallback engaged → " + pipeline);
+          return true;
+        }
+      }
+    }
     String tail;
     if (ON_MAC) {
       tail = "Check macOS camera privacy permissions or wake your Continuity Camera device, then restart the sketch.";
@@ -541,6 +565,34 @@ boolean scheduleAutoRetry(String reason) {
   camStatusMsg = reason + " Retrying (" + attempt + " / " + CAM_AUTO_RETRY_MAX + ")…";
   println("Scheduling camera retry (attempt " + attempt + " / " + CAM_AUTO_RETRY_MAX + ") in " + CAM_RETRY_DELAY_MS + "ms.");
   return true;
+}
+
+String buildMacPipelineFallback() {
+  if (!ON_MAC) return null;
+
+  int index = 0;
+  String[] raw = Capture.list();
+  if (raw != null && cameraPrimaryName != null) {
+    String targetLower = cameraPrimaryName.toLowerCase();
+    int looseMatch = -1;
+    for (int i = 0; i < raw.length; i++) {
+      String entry = raw[i];
+      if (entry == null) continue;
+      String trimmed = entry.trim();
+      if (trimmed.length() == 0) continue;
+      if (trimmed.equals(cameraPrimaryName)) { index = i; looseMatch = i; break; }
+      String lower = trimmed.toLowerCase();
+      if (lower.equals(targetLower)) { looseMatch = i; }
+      else if (looseMatch < 0 && lower.contains(targetLower)) { looseMatch = i; }
+    }
+    if (looseMatch >= 0) index = looseMatch;
+  }
+
+  String pipeline =
+    "pipeline:avfvideosrc device-index=" + index +
+    " capturecaps=video/x-raw,format=NV12,width=" + CAM_W +
+    ",height=" + CAM_H + ",framerate=" + RECORD_FPS + "/1 ! videoconvert";
+  return pipeline;
 }
 
 // ------------------------------
