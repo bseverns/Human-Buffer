@@ -118,7 +118,6 @@ PImage featherMask;
 
 // Camera startup bookkeeping: track which device, whether it’s awake, and retry status.
 String cameraName = null;
-String cameraPrimaryName = null;
 boolean camReady = false;
 boolean camUsingAutoConfig = false;
 boolean camFallbackAttempted = false;
@@ -206,7 +205,6 @@ void setup() {
   // We delay spinning up the camera until consent arrives. Here we just pick which
   // device we *would* use and show a parked status message.
   cameraName = pickCamera();
-  cameraPrimaryName = cameraName;
   if (cameraName == null) { println("No camera found. Exiting."); exit(); }
   camStatusMsg = "Consent is OFF — camera parked.";
 
@@ -626,7 +624,6 @@ String buildMacPipelineFallback(int stage) {
       " ! queue max-size-buffers=2 leaky=downstream" +
       " ! videoconvert ! video/x-raw,format=RGB";
   }
-
   return null;
 }
 
