@@ -118,6 +118,7 @@ PImage featherMask;
 
 // Camera startup bookkeeping: track which device, whether it’s awake, and retry status.
 String cameraName = null;
+String cameraPrimaryName = null;
 boolean camReady = false;
 boolean camUsingAutoConfig = false;
 boolean camFallbackAttempted = false;
@@ -205,6 +206,7 @@ void setup() {
   // We delay spinning up the camera until consent arrives. Here we just pick which
   // device we *would* use and show a parked status message.
   cameraName = pickCamera();
+  cameraPrimaryName = inferPrimaryCameraName(cameraName);
   if (cameraName == null) { println("No camera found. Exiting."); exit(); }
   camStatusMsg = "Consent is OFF — camera parked.";
 
@@ -1542,6 +1544,27 @@ PImage makeRadialFeatherMask(int w, int h, float innerRadius, float featherPx) {
     }
   }
   m.updatePixels(); return m;
+}
+
+/**
+ * inferPrimaryCameraName() keeps a human-friendly device label around even when we fall
+ * back to pipeline-based capture strings. macOS fallback stages lean on it to select
+ * the correct device index.
+ */
+String inferPrimaryCameraName(String chosen) {
+  if (chosen != null && !chosen.toLowerCase().startsWith("pipeline:")) return chosen;
+
+  String[] raw = Capture.list();
+  String[] cams = dedupeStringsCaseInsensitive(raw);
+  if (cams == null || cams.length == 0) return null;
+
+  for (String c : cams) {
+    if (c == null) continue;
+    String trimmed = c.trim();
+    if (trimmed.length() == 0) continue;
+    if (!trimmed.toLowerCase().startsWith("pipeline:")) return trimmed;
+  }
+  return null;
 }
 
 /**
