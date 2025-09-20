@@ -129,6 +129,8 @@ int     camAutoRetryCount = 0;
 long    camRetryAtMs = 0;
 boolean macPipelineFallbackArmed = false;
 boolean macPipelineFallbackActive = false;
+int     macPipelineFallbackStage = 0;
+final int MAC_PIPELINE_FALLBACK_MAX_STAGE = 2;
 
 // Consent gate: OFF by default. We only spin up hardware and file IO once this flips true.
 boolean consent = false;
@@ -482,17 +484,21 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
   camFramesSeen = 0;
   camStartAttemptMs = millis();
   boolean usingPipeline = name.toLowerCase().startsWith("pipeline:");
-  boolean usingMacFallback = usingPipeline && name.toLowerCase().startsWith("pipeline:avfvideosrc");
+  String lowerName = name.toLowerCase();
+  boolean usingMacFallback = usingPipeline && lowerName.startsWith("pipeline:avfvideosrc");
+  boolean usingMacAutoFallback = usingPipeline && lowerName.startsWith("pipeline:autovideosrc");
   camUsingAutoConfig = autoConfig || usingPipeline;
   camFallbackAttempted = camUsingAutoConfig ? true : false;
   if (!autoConfig || usingPipeline) {
     camAutoRetryCount = 0;
   }
   camRetryAtMs = 0;
-  if (usingMacFallback) {
+  if (usingMacFallback || usingMacAutoFallback) {
     macPipelineFallbackActive = true;
   } else if (!usingPipeline) {
     macPipelineFallbackActive = false;
+    macPipelineFallbackArmed = false;
+    macPipelineFallbackStage = 0;
   }
 
   opencv = null;
@@ -533,16 +539,19 @@ void startCamera(String name, int reqW, int reqH, boolean autoConfig) {
  */
 boolean scheduleAutoRetry(String reason) {
   if (camAutoRetryCount >= CAM_AUTO_RETRY_MAX) {
-    if (ON_MAC && !macPipelineFallbackActive) {
-      if (!macPipelineFallbackArmed) {
-        String pipeline = buildMacPipelineFallback();
+    if (ON_MAC) {
+      int nextStage = macPipelineFallbackStage + 1;
+      if (nextStage <= MAC_PIPELINE_FALLBACK_MAX_STAGE) {
+        String pipeline = buildMacPipelineFallback(nextStage);
         if (pipeline != null) {
           macPipelineFallbackArmed = true;
+          macPipelineFallbackStage = nextStage;
           cameraName = pipeline;
           camAutoRetryCount = 0;
           camRetryAtMs = millis() + CAM_RETRY_DELAY_MS;
-          camStatusMsg = reason + " Retrying with macOS AVFoundation fallback…";
-          println("macOS camera fallback engaged → " + pipeline);
+          String stageLabel = describeMacFallbackStage(nextStage);
+          camStatusMsg = reason + " Retrying with macOS fallback (" + stageLabel + ")…";
+          println("macOS camera fallback engaged (" + stageLabel + ") → " + pipeline);
           return true;
         }
       }
@@ -567,42 +576,58 @@ boolean scheduleAutoRetry(String reason) {
   return true;
 }
 
-String buildMacPipelineFallback() {
+String describeMacFallbackStage(int stage) {
+  if (stage == 1) return "stage 1 → autovideosrc";
+  if (stage == 2) return "stage 2 → explicit avfvideosrc";
+  return "stage " + stage;
+}
+
+String buildMacPipelineFallback(int stage) {
   if (!ON_MAC) return null;
 
-  int index = 0;
-  String[] raw = Capture.list();
-  if (raw != null && cameraPrimaryName != null) {
-    String targetLower = cameraPrimaryName.toLowerCase();
-    int looseMatch = -1;
-    for (int i = 0; i < raw.length; i++) {
-      String entry = raw[i];
-      if (entry == null) continue;
-      String trimmed = entry.trim();
-      if (trimmed.length() == 0) continue;
-      if (trimmed.equals(cameraPrimaryName)) { index = i; looseMatch = i; break; }
-      String lower = trimmed.toLowerCase();
-      if (lower.equals(targetLower)) { looseMatch = i; }
-      else if (looseMatch < 0 && lower.contains(targetLower)) { looseMatch = i; }
-    }
-    if (looseMatch >= 0) index = looseMatch;
+  if (stage == 1) {
+    return
+      "pipeline:autovideosrc" +
+      " ! queue max-size-buffers=2 leaky=downstream" +
+      " ! videoconvert ! video/x-raw,format=RGB";
   }
 
-  int w = CAM_W > 0 ? CAM_W : 1280;
-  int h = CAM_H > 0 ? CAM_H : 720;
-  int fps = RECORD_FPS > 0 ? RECORD_FPS : 30;
+  if (stage == 2) {
+    int index = 0;
+    String[] raw = Capture.list();
+    if (raw != null && cameraPrimaryName != null) {
+      String targetLower = cameraPrimaryName.toLowerCase();
+      int looseMatch = -1;
+      for (int i = 0; i < raw.length; i++) {
+        String entry = raw[i];
+        if (entry == null) continue;
+        String trimmed = entry.trim();
+        if (trimmed.length() == 0) continue;
+        if (trimmed.equals(cameraPrimaryName)) { index = i; looseMatch = i; break; }
+        String lower = trimmed.toLowerCase();
+        if (lower.equals(targetLower)) { looseMatch = i; }
+        else if (looseMatch < 0 && lower.contains(targetLower)) { looseMatch = i; }
+      }
+      if (looseMatch >= 0) index = looseMatch;
+    }
 
-  String macCaps =
-    "video/x-raw,width=" + w +
-    ",height=" + h +
-    ",framerate=" + fps + "/1";
+    int w = CAM_W > 0 ? CAM_W : 1280;
+    int h = CAM_H > 0 ? CAM_H : 720;
+    int fps = RECORD_FPS > 0 ? RECORD_FPS : 30;
 
-  String pipeline =
-    "pipeline:avfvideosrc device-index=" + index +
-    " ! " + macCaps +
-    " ! queue max-size-buffers=2 leaky=downstream" +
-    " ! videoconvert ! video/x-raw,format=RGB";
-  return pipeline;
+    String macCaps =
+      "video/x-raw,width=" + w +
+      ",height=" + h +
+      ",framerate=" + fps + "/1";
+
+    return
+      "pipeline:avfvideosrc device-index=" + index +
+      " ! " + macCaps +
+      " ! queue max-size-buffers=2 leaky=downstream" +
+      " ! videoconvert ! video/x-raw,format=RGB";
+  }
+
+  return null;
 }
 
 // ------------------------------
