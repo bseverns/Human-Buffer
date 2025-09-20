@@ -32,6 +32,12 @@ A Processing + Arduino sketch that doubles as a workshop kit on community consen
 4. (Optional) Flash the Arduino sketch `arduino/SaveRecDoubleLongPress/SaveRecDoubleLongPress.ino` and connect a tactile double-press button.
 5. Use the on-screen buttons/keys or Arduino signals to explore the save/consent flow.
 
+### macOS-specific prep (welcome to the club)
+
+- **Camera permission pop-up MIA?** macOS sometimes ghosts the first launch. Crack open **System Settings → Privacy & Security → Camera** and toggle Processing ON. Then restart the sketch so the OS hands over the sensor.
+- **Continuity Camera heads-up.** If you’re using an iPhone as the webcam, wake/unlock it before flipping consent on; otherwise macOS reports the device but never streams.
+- **Virtual cams** (OBS, Zoom, etc.) register fine — the sketch now hunts for names like “OBS Virtual Camera” out of the box.
+
 ## Controls
 
 - **Buttons (top bar):** Consent, Avatar, REC, Show my image, Delete now

@@ -24,7 +24,7 @@
 - **Lighting considerations**: Dependent on camera model selected. Have a desk lamp available to help OpenCV.
 
 ### Computer / OS
-- **OS**: Designed to use on my Surface 7 Pro running Windows 10, but it works on Windows 11 too. Apple tests forthcoming.
+- **OS**: Verified on Windows 10/11 and macOS 13+. On macOS you’ll need to grant Processing access under **System Settings → Privacy & Security → Camera** and then relaunch the sketch.
 
 ### Arduino + Buttons
 - **Board**: Uno
