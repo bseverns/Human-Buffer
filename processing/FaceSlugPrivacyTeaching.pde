@@ -588,10 +588,20 @@ String buildMacPipelineFallback() {
     if (looseMatch >= 0) index = looseMatch;
   }
 
+  int w = CAM_W > 0 ? CAM_W : 1280;
+  int h = CAM_H > 0 ? CAM_H : 720;
+  int fps = RECORD_FPS > 0 ? RECORD_FPS : 30;
+
+  String macCaps =
+    "video/x-raw,width=" + w +
+    ",height=" + h +
+    ",framerate=" + fps + "/1";
+
   String pipeline =
     "pipeline:avfvideosrc device-index=" + index +
-    " capturecaps=video/x-raw,format=NV12,width=" + CAM_W +
-    ",height=" + CAM_H + ",framerate=" + RECORD_FPS + "/1 ! videoconvert";
+    " ! " + macCaps +
+    " ! queue max-size-buffers=2 leaky=downstream" +
+    " ! videoconvert ! video/x-raw,format=RGB";
   return pipeline;
 }
 
