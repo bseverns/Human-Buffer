@@ -277,11 +277,11 @@ void draw() {
   }
 
   // --- Detect & smooth ---
-  // Face detection stays framed as “math, not identity.” We only run the detector
-  // when avatarMode is off, otherwise we build a generative portrait.
-  opencv.loadImage(cam);
+  // Face detection stays framed as “math, not identity.” We run it even while the
+  // avatar is live so the generative portrait can vibe with the human in frame.
   Rectangle chosen = null;
-  if (!avatarMode) {
+  if (cam != null && opencv != null) {
+    opencv.loadImage(cam);
     Rectangle[] faces = opencv.detect();
     chosen = pickLargest(faces);
   }
@@ -1515,100 +1515,6 @@ void drawDebugPIP() {
     float py = height - h - 12 + cy * sy;
     ellipse(px, py, 16, 16); popStyle();
   }
-}
-
-// ------------------------------
-// Face smoothing helpers
-// ------------------------------
-/**
- * pickLargest() selects the biggest detected face — a crude but effective heuristic for
- * single-subject workshops.
- */
-Rectangle pickLargest(Rectangle[] faces) {
-  if (faces == null || faces.length == 0) return null;
-  Rectangle best = null; float area=-1;
-  for (Rectangle r : faces) { float a=r.width*r.height; if (a>area) {area=a; best=r;} }
-  return best;
-}
-
-/**
- * updateFaceSmoothing() eases face positions toward the latest detection. It also tracks
- * streaks so auto-record knows when someone has left the frame.
- */
-void updateFaceSmoothing(Rectangle chosen) {
-  if (avatarMode) { haveFace=false; faceMissingStreak++; facePresentStreak=0; return; }
-  if (chosen != null) {
-    haveFace = true; facePresentStreak++; faceMissingStreak=0;
-    float fx = chosen.x + chosen.width*0.5f;
-    float fy = chosen.y + chosen.height*0.5f;
-    float s  = max(chosen.width, chosen.height) * SQUARE_SCALE;
-    float half = s*0.5f;
-    fx = constrain(fx, half, cam.width - half);
-    fy = constrain(fy, half, cam.height - half);
-    if (cx < 0) { cx = fx; cy = fy; side = s; }
-    else {
-      cx = lerp(cx, fx, SMOOTH_FACTOR);
-      cy = lerp(cy, fy, SMOOTH_FACTOR);
-      side = lerp(side, s, SMOOTH_FACTOR);
-    }
-  } else {
-    faceMissingStreak++;
-    boolean recentlySeen = (facePresentStreak > 0);
-    if (recentlySeen && faceMissingStreak <= FACE_MISSING_GRACE_FRAMES) {
-      haveFace = true;
-    } else {
-      haveFace = false;
-      facePresentStreak = 0;
-    }
-  }
-}
-
-// ------------------------------
-// Avatar (procedural geometric portrait)
-// ------------------------------
-/**
- * drawAvatar() is the privacy-friendly alt identity: a stack of jittered polygons whose
- * randomness is seeded so participants can remix but also reset deterministically.
- */
-void drawAvatar(PGraphics g, Random rng) {
-  g.pushStyle();
-  g.noStroke(); g.fill(0, 60); g.ellipse(g.width/2f, g.height/2f, g.width*0.9f, g.height*0.9f);
-
-  int layers = 7;
-  float base = min(g.width, g.height)*0.35f;
-  rng.setSeed(avatarSeed);
-  for (int i=0;i<layers;i++) {
-    float r   = base * (1.0f - i/(float)layers) * (0.85f + 0.3f*rng.nextFloat());
-    int sides = 3 + rng.nextInt(6);
-    float rot = rng.nextFloat()*TWO_PI;
-    int   cnt = 1 + rng.nextInt(3);
-    for (int k=0;k<cnt;k++) {
-      float rr = r * (0.9f + 0.18f*rng.nextFloat());
-      g.noFill();
-      g.strokeWeight(2 + rng.nextInt(3));
-      g.stroke(180 + rng.nextInt(70));
-      polygon(g, g.width/2f, g.height/2f, rr, sides, rot + k*0.15f);
-    }
-  }
-  g.noStroke(); g.fill(230); g.ellipse(g.width/2f, g.height/2f, 28, 28);
-  g.fill(60);  g.ellipse(g.width/2f, g.height/2f, 12, 12);
-
-  if (useFeather) {
-    PImage snap = g.get(); snap.mask(featherMask); g.image(snap, 0, 0);
-  }
-  g.popStyle();
-}
-
-/**
- * polygon() is a helper that draws regular polygons with optional rotation.
- */
-void polygon(PGraphics g, float cx, float cy, float r, int sides, float rot) {
-  g.beginShape();
-  for (int i=0;i<sides;i++) {
-    float a = rot + TWO_PI * i / sides;
-    g.vertex(cx + cos(a)*r, cy + sin(a)*r);
-  }
-  g.endShape(CLOSE);
 }
 
 // ------------------------------
