@@ -717,8 +717,38 @@ void drawTopButtons() {
  * We bail early if a modal is open so workshop participants stay in the current flow.
  */
 void mousePressed() {
-  // If a modal overlay is active, ignore top-bar clicks
-  if (inReview || sessionReviewActive || confirmDelete || viewingLast) return;
+  if (inReview) {
+    int pw = width - 120, ph = height - 120, px = 60, py = 60;
+    layoutReviewButtons(px, py, pw, ph);
+    if (rvSave.enabled && rvSave.hit(mouseX, mouseY)) { commitSave(); return; }
+    if (rvDisc.hit(mouseX, mouseY)) { cancelReview(); return; }
+    return;
+  }
+
+  if (sessionReviewActive) {
+    int ph = 220, pw = width - 120, px = 60, py = (height - ph)/2;
+    layoutSessionReviewButtons(px, py, pw, ph);
+    if (sessKeep.hit(mouseX, mouseY)) { resolveSessionKeep(); }
+    else if (sessDiscard.hit(mouseX, mouseY)) { resolveSessionDiscard(); }
+    return;
+  }
+
+  if (confirmDelete) {
+    int pw = 420, ph = 160, px = (width - pw)/2, py = (height - ph)/2;
+    layoutDeleteButtons(px, py, pw, ph);
+    if (delYes.hit(mouseX, mouseY)) { deleteLastSaved(); confirmDelete = false; }
+    else if (delNo.hit(mouseX, mouseY))  { confirmDelete = false; }
+    return;
+  }
+
+  if (viewingLast) {
+    int pw = width - 120, ph = height - 120, px = 60, py = 60;
+    layoutShowCloseBox(px, py, pw, ph);
+    if (mouseX >= viewCloseX1 && mouseX <= viewCloseX2 && mouseY >= viewCloseY1 && mouseY <= viewCloseY2) {
+      viewingLast = false;
+    }
+    return;
+  }
 
   for (Btn b : buttons) {
     if (b.hit(mouseX, mouseY)) {
@@ -811,6 +841,46 @@ boolean confirmDelete = false;
 Btn delYes = new Btn("del_yes","Delete",0,0,0,0);
 Btn delNo  = new Btn("del_no", "Cancel",0,0,0,0);
 boolean viewingLast = false;
+int viewCloseX1 = 0, viewCloseY1 = 0, viewCloseX2 = 0, viewCloseY2 = 0;
+
+void layoutReviewButtons(int px, int py, int pw, int ph) {
+  int bw=120, bh=32, gap=20;
+  rvSave.x = px+pw-bw*2-gap-20; rvSave.y = py+ph-60; rvSave.w=bw; rvSave.h=bh;
+  rvDisc.x = px+pw-bw-20;       rvDisc.y = py+ph-60; rvDisc.w=bw; rvDisc.h=bh;
+  rvSave.enabled = consent;
+}
+
+void layoutSessionReviewButtons(int px, int py, int pw, int ph) {
+  int bw=140, bh=32, gap=20;
+  sessKeep.x = px+pw-bw*2-gap-20; sessKeep.y = py+ph-60; sessKeep.w=bw; sessKeep.h=bh;
+  sessDiscard.x = px+pw-bw-20;    sessDiscard.y = py+ph-60; sessDiscard.w=bw; sessDiscard.h=bh;
+}
+
+void layoutDeleteButtons(int px, int py, int pw, int ph) {
+  int bw=120, bh=32, gap=20;
+  delYes.x = px+pw/2 - gap - bw; delYes.y = py+ph-50; delYes.w=bw; delYes.h=bh;
+  delNo.x  = px+pw/2 + gap;      delNo.y  = py+ph-50; delNo.w=bw;  delNo.h=bh;
+}
+
+void layoutShowCloseBox(int px, int py, int pw, int ph) {
+  viewCloseX1 = px+pw-40; viewCloseY1 = py+20; viewCloseX2 = px+pw-20; viewCloseY2 = py+40;
+}
+
+void resolveSessionKeep() {
+  toast("Session kept", 1200);
+  sessionReviewActive = false;
+  sessionReviewPath = null;
+  sessionReviewIsFrameStack = false;
+  sessionReviewFallbackNote = null;
+}
+
+void resolveSessionDiscard() {
+  deleteSessionFile(sessionReviewPath, "Session discarded");
+  sessionReviewActive = false;
+  sessionReviewPath = null;
+  sessionReviewIsFrameStack = false;
+  sessionReviewFallbackNote = null;
+}
 
 /**
  * openReview() flips the PNG review modal on. We store the consent status so the
@@ -838,17 +908,8 @@ void drawReviewOverlay() {
   fill(255); textAlign(LEFT, CENTER); textSize(14);
   text(reviewNote, px+20, py+ph-80);
 
-  int bw=120, bh=32, gap=20;
-  rvSave.x = px+pw-bw*2-gap-20; rvSave.y = py+ph-60; rvSave.w=bw; rvSave.h=bh;
-  rvDisc.x = px+pw-bw-20;       rvDisc.y = py+ph-60; rvDisc.w=bw; rvDisc.h=bh;
-  rvSave.enabled = consent;
-
+  layoutReviewButtons(px, py, pw, ph);
   rvSave.draw(false); rvDisc.draw(false);
-
-  if (mousePressed) {
-    if (rvSave.enabled && rvSave.hit(mouseX, mouseY)) { commitSave(); }
-    else if (rvDisc.hit(mouseX, mouseY)) { cancelReview(); }
-  }
 }
 
 /**
@@ -934,26 +995,8 @@ void drawSessionReviewOverlay() {
   text(overlay.toString(), px+20, py+20);
 
   // Buttons
-  int bw=140, bh=32, gap=20;
-  sessKeep.x = px+pw-bw*2-gap-20; sessKeep.y = py+ph-60; sessKeep.w=bw; sessKeep.h=bh;
-  sessDiscard.x = px+pw-bw-20;    sessDiscard.y = py+ph-60; sessDiscard.w=bw; sessDiscard.h=bh;
+  layoutSessionReviewButtons(px, py, pw, ph);
   sessKeep.draw(false); sessDiscard.draw(false);
-
-  if (mousePressed) {
-    if (sessKeep.hit(mouseX, mouseY)) {
-      toast("Session kept", 1200);
-      sessionReviewActive = false;
-      sessionReviewPath = null;
-      sessionReviewIsFrameStack = false;
-      sessionReviewFallbackNote = null;
-    } else if (sessDiscard.hit(mouseX, mouseY)) {
-      deleteSessionFile(sessionReviewPath, "Session discarded");
-      sessionReviewActive = false;
-      sessionReviewPath = null;
-      sessionReviewIsFrameStack = false;
-      sessionReviewFallbackNote = null;
-    }
-  }
 }
 
 void deleteSessionFile(String path, String msg) {
@@ -1002,15 +1045,8 @@ void drawDeleteConfirm() {
   fill(255); textAlign(CENTER, CENTER); textSize(14);
   text("Delete last saved image?\\nThis cannot be undone.", px+pw/2, py+50);
 
-  int bw=120, bh=32, gap=20;
-  delYes.x = px+pw/2 - gap - bw; delYes.y = py+ph-50; delYes.w=bw; delYes.h=bh;
-  delNo.x  = px+pw/2 + gap;      delNo.y  = py+ph-50; delNo.w=bw;  delNo.h=bh;
+  layoutDeleteButtons(px, py, pw, ph);
   delYes.draw(false); delNo.draw(false);
-
-  if (mousePressed) {
-    if (delYes.hit(mouseX, mouseY)) { deleteLastSaved(); confirmDelete=false; }
-    if (delNo.hit(mouseX, mouseY))  { confirmDelete=false; }
-  }
 }
 
 /**
@@ -1039,10 +1075,7 @@ void drawShowLast() {
   pushStyle(); noFill(); stroke(255); rect(px+pw-40, py+20, 20, 20, 4);
   line(px+pw-36, py+24, px+pw-24, py+36);
   line(px+pw-36, py+36, px+pw-24, py+24); popStyle();
-
-  if (mousePressed) {
-    if (mouseX >= px+pw-40 && mouseX <= px+pw-20 && mouseY >= py+20 && mouseY <= py+40) viewingLast = false;
-  }
+  layoutShowCloseBox(px, py, pw, ph);
 }
 
 /**
