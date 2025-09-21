@@ -39,6 +39,7 @@ import com.hamoid.*;
 
 import java.awt.Rectangle;
 import java.io.File;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
@@ -54,6 +55,7 @@ final int   CAM_W              = 1280;
 final int   CAM_H              = 720;
 // SQUARE_SCALE: face bounding box inflation; gives breathing room beyond raw detection.
 final float SQUARE_SCALE       = 1.35f;
+final int   FACE_MISSING_GRACE_FRAMES = 6;
 // RECORD_FPS: matches both Processing draw() and VideoExport to prevent frame duplication.
 final int   RECORD_FPS         = 30;
 // SERIAL_BAUD + SERIAL_HINT: handshake speed + port name sniff for Arduino-based controls.
@@ -161,11 +163,16 @@ PImage lastSavedFull  = null;
 // Recording state: MP4 session metadata and counters for consent/timeouts.
 boolean recording = false;
 String  recordingFile = null;
+String  recordingBaseName = null;
+FrameStackRecorder frameStackRecorder = null;
+String  recordingFallbackNote = null;
+String  sessionReviewFallbackNote = null;
 int     framesWrittenThisSession = 0;
 
 // Session file post-stop confirmation: modal that asks "keep or toss" after recording stops.
 boolean sessionReviewActive = false;
 String  sessionReviewPath   = null;
+boolean sessionReviewIsFrameStack = false;
 long    sessionReviewDeadlineMs = 0;
 Btn     sessKeep = new Btn("sess_keep", "Keep", 0,0,0,0);
 Btn     sessDiscard = new Btn("sess_discard", "Discard", 0,0,0,0);
@@ -348,10 +355,14 @@ void draw() {
 
   // --- Recording: write frames only if consent (and optionally face present) ---
   // Consent is a hard gate. The optional face gate means “no empty room B-roll.”
-  boolean okToWrite = recording && consent && ve != null;
+  boolean okToWrite = recording && consent && recorderReady();
   boolean passGate  = !gateOnFace || haveFace || avatarMode;
   if (okToWrite && passGate) {
-    ve.saveFrame();
+    if (ve != null) {
+      ve.saveFrame();
+    } else if (frameStackRecorder != null) {
+      frameStackRecorder.saveFrame(null);
+    }
     framesWrittenThisSession++;
   }
 
@@ -896,6 +907,8 @@ void drawSessionReviewOverlay() {
     deleteSessionFile(sessionReviewPath, "Session not confirmed → deleted");
     sessionReviewActive = false;
     sessionReviewPath = null;
+    sessionReviewIsFrameStack = false;
+    sessionReviewFallbackNote = null;
     return;
   }
 
@@ -907,9 +920,18 @@ void drawSessionReviewOverlay() {
   // Text
   fill(255); textAlign(LEFT, TOP); textSize(14);
   int remaining = int((sessionReviewDeadlineMs - millis())/1000.0);
-  text("Keep this session video?\\n" +
-       "File: " + sessionReviewPath + "\\n" +
-       "Auto-delete in: " + remaining + "s", px+20, py+20);
+  String header = sessionReviewIsFrameStack ? "Keep this session capture?" : "Keep this session video?";
+  String detail = sessionReviewIsFrameStack ? "Frames: " + sessionReviewPath : "File: " + sessionReviewPath;
+  String auto = "Auto-delete in: " + remaining + "s";
+  StringBuilder overlay = new StringBuilder();
+  overlay.append(header).append("\n").append(detail).append("\n").append(auto);
+  if (sessionReviewIsFrameStack) {
+    overlay.append("\nConvert via README inside that folder.");
+  }
+  if (sessionReviewFallbackNote != null && sessionReviewFallbackNote.length() > 0) {
+    overlay.append("\nReason: ").append(sessionReviewFallbackNote);
+  }
+  text(overlay.toString(), px+20, py+20);
 
   // Buttons
   int bw=140, bh=32, gap=20;
@@ -922,32 +944,40 @@ void drawSessionReviewOverlay() {
       toast("Session kept", 1200);
       sessionReviewActive = false;
       sessionReviewPath = null;
+      sessionReviewIsFrameStack = false;
+      sessionReviewFallbackNote = null;
     } else if (sessDiscard.hit(mouseX, mouseY)) {
       deleteSessionFile(sessionReviewPath, "Session discarded");
       sessionReviewActive = false;
       sessionReviewPath = null;
+      sessionReviewIsFrameStack = false;
+      sessionReviewFallbackNote = null;
     }
   }
 }
 
-/**
- * deleteSessionFile() centralizes MP4 deletion so every path logs and toasts the result.
- */
 void deleteSessionFile(String path, String msg) {
   if (path == null) return;
   File f = new File(sketchPath(path));
-  boolean ok = f.delete();
+  boolean ok = deleteRecursive(f);
   println((ok? "Deleted: " : "Delete failed: ") + path);
   toast(msg + (ok? "" : " (delete failed)"), 1600);
 }
 
-// ------------------------------
-// Show / Delete last PNG
-// ------------------------------
-/**
- * showLastSavedOverlay() lets folks confirm what the system still remembers.
- * We guard against null paths so stray button clicks don’t pop an empty modal.
- */
+boolean deleteRecursive(File target) {
+  if (target == null) return true;
+  if (!target.exists()) return true;
+  if (target.isDirectory()) {
+    File[] kids = target.listFiles();
+    if (kids != null) {
+      for (File k : kids) {
+        if (!deleteRecursive(k)) return false;
+      }
+    }
+  }
+  return target.delete();
+}
+
 void showLastSavedOverlay() {
   if (lastSavedPath != null) {
     viewingLast = true;
@@ -1249,6 +1279,10 @@ void toast(String msg, int ms) {
 // ------------------------------
 // Recording
 // ------------------------------
+boolean recorderReady() {
+  return ve != null || frameStackRecorder != null;
+}
+
 /**
  * toggleRecording() flips between start/stop recording. A helper so UI + serial share code.
  */
@@ -1260,17 +1294,43 @@ void toggleRecording(){ if (recording) stopRecording(); else startRecording(); }
  */
 void startRecording() {
   if (recording) return;
-  recordingFile = "sessions/session-" + timestamp(false) + ".mp4";
+  recordingBaseName = "sessions/session-" + timestamp(false);
+  recordingFile = recordingBaseName + ".mp4";
   framesWrittenThisSession = 0;
+  recordingFallbackNote = null;
+  frameStackRecorder = null;
+  sessionReviewFallbackNote = null;
+
   try {
     ve = new VideoExport(this, recordingFile);
     ve.setFrameRate(RECORD_FPS);
     ve.startMovie();
     recording = true;
     println("Recording STARTED → " + recordingFile + " (writes require Consent)");
-  } catch(Exception e){
-    println("Could not start recording: " + e.getMessage());
-    ve=null; recording=false; recordingFile=null;
+    return;
+  } catch(Throwable e){
+    String reason = e.getClass().getSimpleName();
+    if (e.getMessage() != null && e.getMessage().length() > 0) reason += ": " + e.getMessage();
+    println("VideoExport unavailable → " + reason);
+    recordingFallbackNote = reason;
+    ve = null;
+  }
+
+  // Fallback: keep workshop momentum by buffering PNG frames on disk.
+  recordingFile = recordingBaseName + "-frames";
+  try {
+    frameStackRecorder = new FrameStackRecorder(this, recordingBaseName, RECORD_FPS, recordingFallbackNote);
+    recordingFile = frameStackRecorder.reviewPath();
+    recording = true;
+    println("Recording FALLBACK → " + recordingFile + " (PNG frame stack; convert via README)");
+    toast("Recording fallback: saving PNG frames", 2200);
+  } catch(Exception e) {
+    frameStackRecorder = null;
+    recordingFile = null;
+    recordingBaseName = null;
+    recordingFallbackNote = null;
+    println("Could not start recording fallback: " + e.getMessage());
+    toast("Recording failed — see console", 2000);
   }
 }
 
@@ -1280,27 +1340,42 @@ void startRecording() {
  */
 void stopRecording() {
   if (!recording) return;
+  String stopPath = recordingFile;
   try {
     if (ve!=null) ve.endMovie();
-    println("Recording STOPPED → " + recordingFile + " (frames: " + framesWrittenThisSession + ")");
   } catch(Exception e){
     println("Error closing movie: " + e.getMessage());
+  }
+  try {
+    if (frameStackRecorder != null) {
+      frameStackRecorder.finish(framesWrittenThisSession > 0);
+    }
+  } catch(Exception e) {
+    println("Error finalizing frame stack: " + e.getMessage());
   } finally {
+    println("Recording STOPPED → " + stopPath + " (frames: " + framesWrittenThisSession + ")");
     recording = false;
+    sessionReviewIsFrameStack = false;
     // Post-stop policy: if 0 frames written, auto-delete. Else, require Keep confirmation.
     if (recordingFile != null) {
       if (framesWrittenThisSession <= 0) {
         deleteSessionFile(recordingFile, "Empty session → deleted");
+        sessionReviewFallbackNote = null;
         recordingFile = null;
       } else {
         sessionReviewActive = true;
         sessionReviewPath = recordingFile;
+        sessionReviewIsFrameStack = (frameStackRecorder != null);
+        sessionReviewFallbackNote = sessionReviewIsFrameStack ? recordingFallbackNote : null;
         sessionReviewDeadlineMs = millis() + SESSION_REVIEW_TIMEOUT_MS;
-        toast("Review session: Keep or Discard", 1500);
+        toast(sessionReviewIsFrameStack ? "Review capture: Keep or Discard" : "Review session: Keep or Discard", 1500);
         recordingFile = null;
       }
     }
     ve=null;
+    frameStackRecorder = null;
+    recordingBaseName = null;
+    recordingFallbackNote = null;
   }
 }
 
@@ -1374,12 +1449,16 @@ void drawDataFlowMap() {
  * The concentric ring only appears if the consent + face gates are satisfied.
  */
 void drawRECIndicator() {
-  boolean writing = (recording && consent && (!gateOnFace || haveFace || avatarMode) && ve!=null);
+  boolean writing = (recording && consent && (!gateOnFace || haveFace || avatarMode) && recorderReady());
   pushStyle();
   fill(255,0,0); noStroke(); ellipse(18, 18, 14, 14);
   if (writing) { noFill(); stroke(255,0,0); strokeWeight(2); ellipse(18,18,20,20); }
   fill(255); textSize(12); textAlign(LEFT, CENTER);
-  text("REC" + (gateOnFace ? " (gated)" : ""), 28, 18);
+  String recLabel = "REC" + (gateOnFace ? " (gated)" : "");
+  if (recording && frameStackRecorder != null) {
+    recLabel += " — PNG fallback";
+  }
+  text(recLabel, 28, 18);
   // Consent badge
   fill(consent ? color(40,180,70) : color(120));
   noStroke(); rect(70,10, 58,16,4); fill(255); textSize(10); textAlign(CENTER,CENTER);
@@ -1440,7 +1519,14 @@ void updateFaceSmoothing(Rectangle chosen) {
       side = lerp(side, s, SMOOTH_FACTOR);
     }
   } else {
-    haveFace = false; faceMissingStreak++; facePresentStreak=0;
+    faceMissingStreak++;
+    boolean recentlySeen = (facePresentStreak > 0);
+    if (recentlySeen && faceMissingStreak <= FACE_MISSING_GRACE_FRAMES) {
+      haveFace = true;
+    } else {
+      haveFace = false;
+      facePresentStreak = 0;
+    }
   }
 }
 
@@ -1507,6 +1593,67 @@ PImage mirrorImage(PImage src) {
   }
   out.updatePixels();
   return out;
+}
+
+class FrameStackRecorder {
+  final PApplet app;
+  final String dirRel;
+  final int fps;
+  final String fallbackReason;
+  int frameIndex = 0;
+
+  FrameStackRecorder(PApplet parent, String baseName, int fps, String reason) {
+    this.app = parent;
+    this.dirRel = baseName + "-frames";
+    this.fps = fps;
+    this.fallbackReason = reason;
+    ensureDir();
+  }
+
+  void ensureDir() {
+    File dir = new File(app.sketchPath(dirRel));
+    if (!dir.exists() && !dir.mkdirs()) {
+      throw new RuntimeException("Could not create frame stack directory: " + dir.getAbsolutePath());
+    }
+  }
+
+  void saveFrame(PImage frame) {
+    if (frame == null) frame = app.get();
+    String filename = String.format("%s/frame-%05d.png", dirRel, frameIndex++);
+    frame.save(app.sketchPath(filename));
+  }
+
+  void finish(boolean hasFrames) {
+    if (!hasFrames) {
+      discard();
+      return;
+    }
+    writeReadme();
+  }
+
+  void writeReadme() {
+    File dir = new File(app.sketchPath(dirRel));
+    if (!dir.exists()) return;
+    String readmePath = app.sketchPath(dirRel + "/README.txt");
+    PrintWriter out = app.createWriter(readmePath);
+    out.println("Frame stack fallback engaged because MP4 export failed.");
+    if (fallbackReason != null && fallbackReason.length() > 0) {
+      out.println("Reason: " + fallbackReason);
+    }
+    out.println();
+    out.println("This folder holds sequential PNG frames. Convert them to a video with ffmpeg:");
+    out.println("  ffmpeg -framerate " + fps + " -i frame-%05d.png -c:v libx264 -pix_fmt yuv420p session.mp4");
+    out.println();
+    out.println("Run the command above from inside " + dirRel + ".");
+    out.flush();
+    out.close();
+  }
+
+  void discard() {
+    deleteRecursive(new File(app.sketchPath(dirRel)));
+  }
+
+  String reviewPath() { return dirRel; }
 }
 
 /**

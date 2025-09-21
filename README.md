@@ -65,6 +65,12 @@ You’re not cursed; computers are just dramatic. Run through these common trip 
 - **Enterprise admin policies**: School and corporate builds often gate camera access or block unsigned serial drivers. Loop in IT to whitelist Processing and (if needed) install the Arduino drivers with admin privileges.
 - **Antivirus crankiness**: Real-time scanners can quarantine the VideoExport temp files. Add the Processing sketch folder to the allowlist.
 
+### VideoExport vs. Processing 4 beef
+
+- **Symptom**: Hitting `REC` flashes red in the console with `NoSuchFieldError` (Processing yells “library incompatible”) and nothing writes.
+- **What we do now**: The sketch automatically falls back to a PNG frame stack so workshop momentum survives. Look for a new `sessions/session-*-frames/` folder with a `README.txt` that spells out the `ffmpeg` command (`ffmpeg -framerate 30 -i frame-%05d.png -c:v libx264 -pix_fmt yuv420p session.mp4`).
+- **Long-term fix**: Update the Video Export library via Contribution Manager once a Processing 4–compatible release ships. The fallback keeps data minimization intact, but MP4s are still the goal.
+
 Still stuck? Drop notes in `notes/` so future facilitators inherit the wisdom (and the punk spirit).
 
 ## Controls
