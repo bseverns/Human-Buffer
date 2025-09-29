@@ -12,6 +12,29 @@ A Processing + Arduino sketch that doubles as a workshop kit on community consen
 
 > Built for STEAM classrooms, community tech clinics, and punk art spaces where ethics, consent, and UX are first-class citizens.
 
+<details markdown="block">
+<summary><strong>Educator Mode — logistics, standards, and clock time</strong></summary>
+
+#### Logistics (what you need to pull this off)
+
+- **Gear:** one webcam-enabled laptop running Processing, optional Arduino button deck, projector if you want the room to debug together.
+- **Printables:** copies of the [Ethics zine](ETHICS.md) + [Privacy brief](PRIVACY.md) so students can annotate instead of doomscrolling.
+- **Room setup:** pods of 2–3 learners with sight lines to the projected screen; tape off a “camera consent zone” so boundaries stay visible.
+
+#### Standards alignment (translate the punk ethos to admin-speak)
+
+- **Minnesota Academic Standards in Science (2019) — Nature of Science and Engineering:** Learners evaluate the societal and ethical trade-offs of proposed engineering solutions when they debate camera usage, retention limits, and consent defaults.
+- **Minnesota Academic Standards in the Arts (Media Arts, 2018):** Students refine media artworks that balance intent, audience, and context by iterating on avatar aesthetics and display choices.
+- **Minnesota Computer Science Standards (2024) — Impacts of Computing:** Facilitators guide students to analyze how computing innovations shape equity, privacy, and security in local communities.
+
+#### Classroom time cost (because bells still ring)
+
+- **Single block:** 55–65 minutes covers the playlist as written with a brisk demo-to-reflection arc.
+- **Two-block deep dive:** 2 × 45 minutes lets you slow down the Arduino build, run peer critiques, and record exit interviews on consent culture.
+- **Prep buffer:** budget 20 minutes before class to verify libraries, clear old captures, and stage the avatar assets.
+
+</details>
+
 ## Workshop playlist
 
 1. **Consent check-in** — Read the [Ethics zine](ETHICS.md) out loud; ask the group who decides when cameras roll.
